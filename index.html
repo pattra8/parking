@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pattra Villa 8 — Parking Map</title>
+<link href="https://fonts.googleapis.com/css2?family=Prompt:wght@600;700;800&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0f1a;--surface:#111827;--border:rgba(255,255,255,0.08);--text:#f1f5f9;--muted:rgba(255,255,255,0.45);--accent:#38bdf8;--amber:#f59e0b;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:"IBM Plex Sans Thai",sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+/* ── HEADER ── */
+.hdr{background:linear-gradient(135deg,#0d1f35,#0c1a2e);padding:0 16px;height:48px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-shrink:0;transition:background .4s;}
+.hdr.admin-on{background:linear-gradient(135deg,#2d1f00,#1f1500);border-bottom-color:rgba(245,158,11,0.35);}
+.logo{font-family:"Prompt",sans-serif;font-weight:700;font-size:14px;display:flex;align-items:center;gap:8px;}
+.admin-crown{display:none;font-size:14px;}
+.hdr.admin-on .admin-crown{display:inline;}
+.live{background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#fca5a5;padding:3px 9px;border-radius:20px;font-size:11px;display:flex;align-items:center;gap:5px;}
+.dot{width:6px;height:6px;background:#ef4444;border-radius:50%;animation:blink 1.4s infinite;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.hdr-btns{display:flex;gap:7px;align-items:center;}
+.hbtn{background:rgba(255,255,255,0.07);border:1px solid var(--border);color:var(--muted);padding:5px 11px;border-radius:7px;font-size:11px;cursor:pointer;transition:all .2s;font-family:"IBM Plex Sans Thai",sans-serif;}
+.hbtn:hover{background:rgba(255,255,255,0.12);color:var(--text);}
+.hbtn.active{background:rgba(245,158,11,0.2);border-color:rgba(245,158,11,0.5);color:#fcd34d;}
+.hbtn.admin-key{background:rgba(255,255,255,0.07);transition:all .3s;}
+.hdr.admin-on .hbtn.admin-key{background:rgba(245,158,11,0.2);border-color:rgba(245,158,11,0.5);color:#fcd34d;}
+/* Add slot btn — only visible when admin */
+.hbtn-add{background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:white;padding:5px 13px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:"IBM Plex Sans Thai",sans-serif;display:none;align-items:center;gap:5px;transition:opacity .2s;}
+.hbtn-add:hover{opacity:.85;}
+.hdr.admin-on .hbtn-add{display:flex;}
+
+/* ── MAIN ── */
+.main{flex:1;display:flex;overflow:hidden;}
+.map-outer{flex:1;overflow:auto;background:#060b12;display:flex;align-items:flex-start;justify-content:center;padding:14px;}
+.map-container{position:relative;width:600px;height:677px;flex-shrink:0;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.7);}
+.map-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
+.map-badge{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(8,14,26,0.85);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);border-radius:8px;padding:5px 14px;font-family:"Prompt",sans-serif;font-size:11px;font-weight:700;color:white;white-space:nowrap;z-index:5;pointer-events:none;}
+.edit-hint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(245,158,11,0.92);color:#0a0f1a;padding:4px 14px;border-radius:20px;font-size:10px;font-weight:700;font-family:"Prompt",sans-serif;z-index:20;display:none;white-space:nowrap;pointer-events:none;}
+body.edit-mode .edit-hint{display:block;}
+
+/* ── SLOT ── */
+.slot{position:absolute;border-radius:7px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;user-select:none;z-index:10;box-shadow:0 2px 8px rgba(0,0,0,0.55);border:1.5px solid rgba(255,255,255,0.18);transition:filter .15s,transform .1s;}
+.slot::before{content:"";position:absolute;inset:0;border-radius:6px;background:linear-gradient(to bottom,rgba(255,255,255,0.2),rgba(255,255,255,0));pointer-events:none;}
+.slot:hover{filter:brightness(1.22);}
+.slot-label{font-family:"Prompt",sans-serif;font-size:12px;font-weight:800;color:white;text-shadow:0 1px 3px rgba(0,0,0,0.5);line-height:1;position:relative;z-index:1;}
+.slot-sub{font-size:8px;color:rgba(255,255,255,0.8);margin-top:1px;position:relative;z-index:1;}
+
+.free   {background:linear-gradient(135deg,#4ade80,#16a34a);}
+.rented {background:linear-gradient(135deg,#f87171,#b91c1c);}
+.visitor{background:linear-gradient(135deg,#60a5fa,#1d4ed8);}
+.pending{background:linear-gradient(135deg,#fbbf24,#b45309);}
+.closed {background:linear-gradient(135deg,#6b7280,#374151);}
+
+body.edit-mode .slot{cursor:grab;box-shadow:0 2px 8px rgba(0,0,0,0.55),0 0 0 2px rgba(245,158,11,0.6);}
+body.edit-mode .slot:active{cursor:grabbing;transform:scale(1.08);filter:brightness(1.3) drop-shadow(0 4px 12px rgba(0,0,0,0.5));z-index:50;}
+
+/* New slot animation */
+.slot.new-slot{animation:popIn .35s cubic-bezier(.17,.67,.35,1.4) forwards,newglow 2s 0.35s infinite;}
+@keyframes popIn{from{transform:scale(0.3);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes newglow{0%,100%{box-shadow:0 2px 8px rgba(0,0,0,0.55),0 0 0 2px rgba(245,158,11,0.6),0 0 14px rgba(56,189,248,0.5)}50%{box-shadow:0 2px 8px rgba(0,0,0,0.55),0 0 0 2px rgba(245,158,11,0.6),0 0 22px rgba(56,189,248,0.8)}}
+
+/* Delete btn on slot in edit mode */
+.slot .del-btn{position:absolute;top:-7px;right:-7px;width:16px;height:16px;background:#ef4444;border:1.5px solid white;border-radius:50%;font-size:10px;color:white;display:none;align-items:center;justify-content:center;cursor:pointer;z-index:30;font-weight:900;line-height:1;}
+body.edit-mode .slot .del-btn{display:flex;}
+.slot .del-btn:hover{background:#b91c1c;transform:scale(1.2);}
+
+/* ── DECORATIVE ── */
+.vis-zone{position:absolute;border:1.5px dashed rgba(96,165,250,0.5);border-radius:8px;background:rgba(59,130,246,0.07);z-index:8;pointer-events:none;}
+.vis-label{position:absolute;font-family:"Prompt",sans-serif;font-size:9px;font-weight:700;color:rgba(147,197,253,0.85);pointer-events:none;}
+.glow-ring{position:absolute;border:2px solid #22c55e;border-radius:50%;background:rgba(34,197,94,0.1);z-index:7;pointer-events:none;animation:gpulse 2s infinite;}
+@keyframes gpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(1.05)}}
+.entrance{position:absolute;z-index:10;pointer-events:none;}
+
+/* ── SIDEBAR ── */
+.sidebar{width:228px;background:var(--surface);border-left:1px solid var(--border);padding:12px 11px;display:flex;flex-direction:column;gap:9px;overflow-y:auto;flex-shrink:0;}
+.sc{background:#1a2332;border:1px solid var(--border);border-radius:9px;padding:11px;}
+.sc h3{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px;font-weight:600;}
+.sr{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;}
+.sr:last-child{border:none;}
+.sl{color:rgba(255,255,255,0.65);}
+.sv{font-weight:700;font-size:13px;}
+.leg{display:flex;flex-direction:column;gap:5px;}
+.li{display:flex;align-items:center;gap:6px;font-size:11px;color:rgba(255,255,255,0.6);}
+.ls{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
+.bmain{width:100%;padding:9px;border:none;border-radius:8px;font-family:"IBM Plex Sans Thai",sans-serif;font-size:12px;font-weight:700;cursor:pointer;color:white;transition:opacity .2s;margin-bottom:6px;}
+.bmain:last-child{margin-bottom:0;}
+.bmain:hover{opacity:.85;}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:500;opacity:0;pointer-events:none;transition:opacity .25s;}
+.modal-overlay.show{opacity:1;pointer-events:all;}
+.modal{background:#1a2332;border:1px solid var(--border);border-radius:14px;padding:22px;width:320px;transform:translateY(20px);transition:transform .25s;box-shadow:0 20px 60px rgba(0,0,0,0.6);}
+.modal-overlay.show .modal{transform:translateY(0);}
+.modal h2{font-family:"Prompt",sans-serif;font-size:16px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.field{display:flex;flex-direction:column;gap:5px;margin-bottom:13px;}
+.field label{font-size:11px;color:var(--muted);font-weight:600;}
+.field input,.field select{background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:7px;padding:9px 11px;color:var(--text);font-family:"IBM Plex Sans Thai",sans-serif;font-size:13px;transition:border-color .2s;}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent);}
+.field select option{background:#1a2332;}
+.modal-actions{display:flex;gap:8px;margin-top:6px;}
+.btn-cancel{flex:1;padding:9px;background:rgba(255,255,255,0.06);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;font-family:"IBM Plex Sans Thai",sans-serif;}
+.btn-confirm{flex:1;padding:9px;background:linear-gradient(135deg,#22c55e,#16a34a);border:none;border-radius:8px;color:white;font-size:12px;font-weight:700;cursor:pointer;font-family:"IBM Plex Sans Thai",sans-serif;}
+.btn-confirm:hover{opacity:.88;}
+
+/* PIN modal */
+.pin-row{display:flex;gap:8px;justify-content:center;margin:12px 0;}
+.pin-d{width:44px;height:52px;background:rgba(255,255,255,0.05);border:1px solid var(--border);border-radius:10px;text-align:center;font-size:20px;font-weight:700;color:var(--text);font-family:"Prompt",sans-serif;transition:border-color .2s;}
+.pin-d:focus{outline:none;border-color:var(--amber);}
+.pin-err{font-size:12px;color:#fca5a5;text-align:center;display:none;margin-top:-6px;}
+
+/* ── TOOLTIP ── */
+.tt{position:fixed;background:rgba(6,11,20,0.97);color:white;padding:10px 14px;border-radius:10px;font-size:12px;pointer-events:none;display:none;min-width:155px;border:1px solid rgba(56,189,248,0.35);line-height:1.9;z-index:999;box-shadow:0 8px 32px rgba(0,0,0,0.6);}
+.tt.on{display:block;}
+.tt-name{font-family:"Prompt",sans-serif;font-weight:700;font-size:13px;color:#38bdf8;margin-bottom:2px;}
+
+/* ── NOTIF ── */
+.notif{position:fixed;bottom:14px;left:50%;transform:translateX(-50%) translateY(70px);background:#1a2332;border:1px solid rgba(34,197,94,0.4);border-radius:10px;padding:9px 16px;font-size:12px;z-index:1000;transition:transform .3s;white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,0.4);}
+.notif.on{transform:translateX(-50%) translateY(0);}
+.notif.err{border-color:rgba(239,68,68,0.4);}
+
+/* ── GRID OVERLAY (edit mode) ── */
+body.edit-mode .map-container::after{
+  content:"";position:absolute;inset:0;
+  background-image:
+    linear-gradient(rgba(56,189,248,0.10) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,0.10) 1px, transparent 1px);
+  background-size: 8px 8px;
+  z-index:6; pointer-events:none;
+}
+/* Alignment guide lines (drawn by JS) */
+.guide{position:absolute;background:#38bdf8;z-index:60;pointer-events:none;
+       box-shadow:0 0 8px rgba(56,189,248,0.7);transition:opacity .12s;}
+.guide.h{height:1px;left:0;right:0;}
+.guide.v{width:1px;top:0;bottom:0;}
+</style>
+</head>
+<body>
+
+<!-- ── HEADER ── -->
+<div class="hdr" id="hdr">
+  <div class="logo">
+    <span>🅿️</span>
+    <span>Pattra Villa 8 — Parking Map</span>
+    <span class="admin-crown">👑</span>
+  </div>
+  <div class="hdr-btns">
+    <div class="live"><div class="dot"></div> LIVE</div>
+    <button class="hbtn" id="editBtn"  onclick="toggleEdit()" style="display:none">✏️ แก้ตำแหน่ง</button>
+    <button class="hbtn" id="alignBtn" onclick="autoAlignAll()" style="display:none">📐 Auto Align</button>
+    <button class="hbtn" id="saveBtn"  onclick="savePositions()" style="display:none">💾 บันทึก</button>
+    <button class="hbtn" id="resetBtn" onclick="resetPositions()" style="display:none">↺ Reset</button>
+    <button class="hbtn-add" id="addBtn" onclick="openAddModal()">＋ เพิ่มช่องจอด</button>
+    <button class="hbtn admin-key" id="adminBtn" onclick="openPinModal()">🔑 Admin</button>
+  </div>
+</div>
+
+<!-- ── MAIN ── -->
+<div class="main">
+<div class="map-outer">
+  <div class="map-container" id="mapContainer">
+    <img class="map-bg" src="bg.jpg" alt="Villa aerial"/>
+    <div class="map-badge">UPDATE สถานะที่จอดรถ · เมษายน 2569</div>
+
+    <!-- Visitor zone -->
+    <div class="vis-zone"  style="left:28px;top:610px;width:216px;height:54px;"></div>
+    <div class="vis-label" style="left:34px;top:613px;">👥 Visitors Zone</div>
+
+    <!-- Glow วนจอด C -->
+    <div class="glow-ring" style="left:294px;top:510px;width:66px;height:66px;"></div>
+
+    <!-- Entrance -->
+    <div class="entrance" style="left:18px;bottom:54px;">
+      <svg width="80" height="24"><polygon points="0,12 16,2 16,7 68,7 68,17 16,17 16,22" fill="#ef4444" opacity=".9"/><text x="78" y="16" text-anchor="end" fill="#fca5a5" font-size="11" font-weight="700" font-family="Prompt,sans-serif">ทางเข้า</text></svg>
+    </div>
+
+    <!-- ══ DEFAULT SLOTS ══ -->
+    <div class="slot free"    data-id="วนจอด"    data-status="ว่าง"         data-house=""       data-note="พร้อมให้เช่า"           style="left:34px; top:152px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:8px">วนจอด</span><span class="slot-sub">ว่าง</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/8"        data-status="เช่าประจำ"   data-house="8244"   data-note="เช่าตั้งแต่ ก.ย. 2566"  style="left:92px; top:152px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/8</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/20"       data-status="เช่าประจำ"   data-house="8244"   data-note="เช่าตั้งแต่ ก.ย. 2566"  style="left:150px;top:152px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/20</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/15"       data-status="เช่าประจำ"   data-house="1335"   data-note="22 พ.ย. 68–22 เม.ย. 69" style="left:299px;top:213px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/15</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot free"    data-id="วนจอด A"  data-status="ว่าง"         data-house=""       data-note="พร้อมให้เช่า"           style="left:299px;top:255px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:8px">วนจอด</span><span class="slot-sub">ว่าง</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/3"        data-status="เช่าประจำ"   data-house="3"      data-note=""                       style="left:299px;top:297px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/3</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/35"       data-status="เช่าประจำ"   data-house="35"     data-note=""                       style="left:299px;top:339px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/35</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/43"       data-status="เช่าประจำ"   data-house="43"     data-note="เช่า 1–30 เม.ย. 69"    style="left:357px;top:339px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/43</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot free"    data-id="วนจอด B"  data-status="ว่าง"         data-house=""       data-note=""                       style="left:299px;top:381px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:8px">วนจอด</span><span class="slot-sub">ว่าง</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot free"    data-id="วนจอด C"  data-status="ว่าง"         data-house=""       data-note=""                       style="left:299px;top:510px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:8px">วนจอด</span><span class="slot-sub">ว่าง</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot visitor" data-id="V1"        data-status="Visitor ว่าง" data-house=""      data-note="จองรายวัน ฿50/100/150"  style="left:34px; top:620px;width:46px;height:36px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:11px">V1</span><span class="slot-sub">ว่าง</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot pending" data-id="V2"        data-status="รอยืนยัน"    data-house="กข-1234" data-note="Upload slip แล้ว"     style="left:86px; top:620px;width:46px;height:36px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:11px">V2</span><span class="slot-sub">รอ confirm</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="V3(/21)"   data-status="เช่าประจำ"   data-house="21"     data-note="ย้ายมาจาก /21 เดิม"    style="left:138px;top:620px;width:46px;height:36px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:10px">V3</span><span class="slot-sub">/21 เช่า</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot closed"  data-id="/21 เดิม"  data-status="ปิด"          data-house=""       data-note="ติดสวน ห้ามจอด"        style="left:190px;top:620px;width:46px;height:36px;" onclick="hc(event,this)"><span class="slot-label">✕</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/45"       data-status="เช่าประจำ"   data-house="45"     data-note=""                       style="left:395px;top:614px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/45</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot rented"  data-id="/67"       data-status="เช่าประจำ"   data-house="67"     data-note="ทะเบียน 2ขอ1822"       style="left:453px;top:614px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label">/67</span><span class="slot-sub">เช่าอยู่</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+    <div class="slot closed"  data-id="สมอสร"    data-status="ปิด"          data-house=""       data-note="พื้นที่สมอสร"          style="left:511px;top:614px;width:52px;height:38px;" onclick="hc(event,this)"><span class="slot-label" style="font-size:8px">สมอสร✕</span><div class="del-btn" onclick="delSlot(event,this)">✕</div></div>
+
+    <div class="edit-hint">✏️ โหมดแก้ไข — ลาก slot / กด ✕ เพื่อลบ · กด Shift = ปิด snap</div>
+
+    <!-- Alignment guides (shown while dragging) -->
+    <div class="guide h" id="gH" style="display:none"></div>
+    <div class="guide v" id="gV" style="display:none"></div>
+  </div>
+</div>
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+  <div class="sc">
+    <h3>📊 สรุปวันนี้</h3>
+    <div class="sr"><span class="sl">ว่าง</span><span class="sv" style="color:#22c55e" id="cnt-free">3</span></div>
+    <div class="sr"><span class="sl">เช่าประจำ</span><span class="sv" style="color:#ef4444" id="cnt-rented">9</span></div>
+    <div class="sr"><span class="sl">Visitor ว่าง</span><span class="sv" style="color:#3b82f6" id="cnt-visitor">1</span></div>
+    <div class="sr"><span class="sl">รอ Confirm</span><span class="sv" style="color:#f59e0b" id="cnt-pending">1</span></div>
+    <div class="sr"><span class="sl">ปิด</span><span class="sv" style="color:#6b7280" id="cnt-closed">4</span></div>
+  </div>
+  <div class="sc">
+    <h3>💰 เมษายน 2569</h3>
+    <div class="sr"><span class="sl">รายได้เช่า</span><span class="sv" style="color:#38bdf8;font-size:12px">฿4,500</span></div>
+    <div class="sr"><span class="sl">Visitor เดือนนี้</span><span class="sv" style="color:#38bdf8;font-size:12px">8 ครั้ง</span></div>
+  </div>
+  <div class="sc" id="admin-guide" style="display:none">
+    <h3 style="color:#fcd34d">👑 Admin Mode</h3>
+    <div style="font-size:11px;color:var(--muted);line-height:1.8">
+      <div>• กด <strong style="color:#86efac">＋ เพิ่มช่องจอด</strong></div>
+      <div>• กด <strong style="color:#fcd34d">✏️ แก้ตำแหน่ง</strong> แล้วลาก</div>
+      <div>• กด <strong style="color:#fca5a5">✕</strong> บน slot เพื่อลบ</div>
+      <div>• กด <strong style="color:#86efac">💾 บันทึก</strong></div>
+    </div>
+  </div>
+  <div class="sc">
+    <h3>💡 Legend</h3>
+    <div class="leg">
+      <div class="li"><div class="ls" style="background:#22c55e"></div>ว่าง</div>
+      <div class="li"><div class="ls" style="background:#ef4444"></div>เช่าประจำ</div>
+      <div class="li"><div class="ls" style="background:#3b82f6"></div>Visitor ว่าง</div>
+      <div class="li"><div class="ls" style="background:#f59e0b"></div>รอ confirm</div>
+      <div class="li"><div class="ls" style="background:#6b7280"></div>ปิด</div>
+    </div>
+  </div>
+  <button class="bmain" style="background:linear-gradient(135deg,#3b82f6,#2563eb)" onclick="showNotif('ok','🚗 เปิดหน้าจอง Visitor')">🚗 จอง Visitor รายวัน</button>
+  <button class="bmain" style="background:linear-gradient(135deg,#f59e0b,#d97706)" onclick="showNotif('ok','⏳ V2 รอยืนยัน 1 รายการ')">⏳ Pending: 1 รายการ</button>
+  <div class="sc" style="font-size:10px;color:var(--muted);line-height:1.9">
+    <h3>💳 ชำระเงิน</h3>
+    <div>SCB 093-2-43819-1</div>
+    <div>ภัทราวิลล่า 8</div>
+    <div style="margin-top:3px;opacity:.5">3ชม ฿50 · 5ชม ฿100 · ค้างคืน ฿150</div>
+  </div>
+</div>
+</div>
+
+<!-- ══ PIN MODAL ══ -->
+<div class="modal-overlay" id="pinModal">
+  <div class="modal">
+    <h2>🔐 Admin Login</h2>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">กรอก PIN 4 หลัก</p>
+    <div class="pin-row">
+      <input class="pin-d" type="password" maxlength="1" id="p1" oninput="npin(this,'p2')"/>
+      <input class="pin-d" type="password" maxlength="1" id="p2" oninput="npin(this,'p3')"/>
+      <input class="pin-d" type="password" maxlength="1" id="p3" oninput="npin(this,'p4')"/>
+      <input class="pin-d" type="password" maxlength="1" id="p4" oninput="chkpin()"/>
+    </div>
+    <div class="pin-err" id="pin-err">PIN ไม่ถูกต้อง ลองอีกครั้ง</div>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px">Demo PIN: 1234</div>
+    <div class="modal-actions" style="margin-top:14px">
+      <button class="btn-cancel" onclick="closePinModal()">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ ADD SLOT MODAL ══ -->
+<div class="modal-overlay" id="addModal">
+  <div class="modal">
+    <h2>＋ เพิ่มช่องจอดรถ</h2>
+    <div class="field">
+      <label>ชื่อช่อง *</label>
+      <input type="text" id="new-id" placeholder="เช่น /55, วนจอด D, V4"/>
+    </div>
+    <div class="field">
+      <label>ประเภท *</label>
+      <select id="new-type">
+        <option value="free">🟢 ว่าง</option>
+        <option value="rented">🔴 เช่าประจำ</option>
+        <option value="visitor">🔵 Visitor</option>
+        <option value="pending">🟡 รอ Confirm</option>
+        <option value="closed">⬛ ปิด</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>บ้านเลขที่ (ถ้ามี)</label>
+      <input type="text" id="new-house" placeholder="เช่น 55"/>
+    </div>
+    <div class="field">
+      <label>หมายเหตุ</label>
+      <input type="text" id="new-note" placeholder="เช่น เช่าตั้งแต่ พ.ค. 69"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeAddModal()">ยกเลิก</button>
+      <button class="btn-confirm" onclick="addSlot()">＋ เพิ่มช่องจอด</button>
+    </div>
+  </div>
+</div>
+
+<!-- TOOLTIP -->
+<div class="tt" id="tt"><div class="tt-name" id="ttn"></div><div id="tts"></div><div id="tth"></div><div id="ttd"></div></div>
+<div class="notif" id="ntf"><span id="ntfm"></span></div>
+
+<script>
+// ── STATE ──
+const SKEY = 'pv8_slots_v3';
+let isAdmin = false, editMode = false;
+let dragging = null, startX, startY, origLeft, origTop, clickSX, clickSY;
+
+// ── LOAD positions ──
+function loadPositions() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SKEY) || '{}');
+    document.querySelectorAll('.slot').forEach(el => {
+      const d = s[el.dataset.id];
+      if (d) { el.style.left = d.l; el.style.top = d.t; }
+    });
+    // Restore dynamic slots
+    if (s.__dynamic__) {
+      s.__dynamic__.forEach(slot => createSlotEl(slot, false));
+    }
+  } catch(e) {}
+}
+
+function savePositions() {
+  const s = {};
+  const dynamic = [];
+  document.querySelectorAll('.slot').forEach(el => {
+    s[el.dataset.id] = { l: el.style.left, t: el.style.top };
+    if (el.dataset.dynamic === '1') {
+      dynamic.push({
+        id: el.dataset.id,
+        type: el.dataset.type,
+        status: el.dataset.status,
+        house: el.dataset.house,
+        note: el.dataset.note,
+        left: el.style.left,
+        top: el.style.top
+      });
+    }
+  });
+  s.__dynamic__ = dynamic;
+  localStorage.setItem(SKEY, JSON.stringify(s));
+  showNotif('ok', '✅ บันทึกทุก slot แล้ว');
+  toggleEdit();
+}
+
+function resetPositions() {
+  if (!confirm('Reset ตำแหน่งและ slot ที่เพิ่มทั้งหมด?')) return;
+  localStorage.removeItem(SKEY);
+  location.reload();
+}
+
+// ── ADMIN LOGIN ──
+function openPinModal() {
+  if (isAdmin) { adminLogout(); return; }
+  document.getElementById('pinModal').classList.add('show');
+  setTimeout(() => document.getElementById('p1').focus(), 200);
+}
+function closePinModal() {
+  document.getElementById('pinModal').classList.remove('show');
+  ['p1','p2','p3','p4'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('pin-err').style.display = 'none';
+}
+function npin(el, nid) { if (el.value.length >= 1) document.getElementById(nid)?.focus(); }
+function chkpin() {
+  const pin = ['p1','p2','p3','p4'].map(id => document.getElementById(id).value).join('');
+  if (pin.length < 4) return;
+  if (pin === '1234') {
+    closePinModal();
+    adminUnlock();
+  } else {
+    document.getElementById('pin-err').style.display = 'block';
+    ['p1','p2','p3','p4'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('p1').focus();
+    setTimeout(() => document.getElementById('pin-err').style.display = 'none', 2000);
+  }
+}
+function adminUnlock() {
+  isAdmin = true;
+  document.getElementById('hdr').classList.add('admin-on');
+  document.getElementById('adminBtn').textContent = '🔓 ออกจากระบบ';
+  document.getElementById('editBtn').style.display = 'block';
+  document.getElementById('alignBtn').style.display = 'block';
+  document.getElementById('resetBtn').style.display = 'block';
+  document.getElementById('admin-guide').style.display = 'block';
+  showNotif('ok', '👑 Admin เข้าสู่ระบบแล้ว');
+  // Auto enter edit mode
+  if (!editMode) toggleEdit();
+}
+function adminLogout() {
+  if (editMode) toggleEdit();
+  isAdmin = false;
+  document.getElementById('hdr').classList.remove('admin-on');
+  document.getElementById('adminBtn').textContent = '🔑 Admin';
+  document.getElementById('editBtn').style.display = 'none';
+  document.getElementById('alignBtn').style.display = 'none';
+  document.getElementById('saveBtn').style.display = 'none';
+  document.getElementById('resetBtn').style.display = 'none';
+  document.getElementById('admin-guide').style.display = 'none';
+  showNotif('ok', '🔒 ออกจากระบบแล้ว');
+}
+
+// ── EDIT MODE ──
+function toggleEdit() {
+  if (!isAdmin) return;
+  editMode = !editMode;
+  document.body.classList.toggle('edit-mode', editMode);
+  document.getElementById('editBtn').textContent = editMode ? '❌ ยกเลิก' : '✏️ แก้ตำแหน่ง';
+  document.getElementById('editBtn').classList.toggle('active', editMode);
+  document.getElementById('saveBtn').style.display = editMode ? 'block' : 'none';
+  if (!editMode) loadPositions();
+}
+
+// ── ADD SLOT MODAL ──
+function openAddModal() {
+  document.getElementById('addModal').classList.add('show');
+  document.getElementById('new-id').value = '';
+  document.getElementById('new-type').value = 'free';
+  document.getElementById('new-house').value = '';
+  document.getElementById('new-note').value = '';
+  setTimeout(() => document.getElementById('new-id').focus(), 200);
+}
+function closeAddModal() { document.getElementById('addModal').classList.remove('show'); }
+
+const TYPE_STATUS = {
+  free: 'ว่าง', rented: 'เช่าประจำ', visitor: 'Visitor ว่าง', pending: 'รอยืนยัน', closed: 'ปิด'
+};
+const TYPE_LABEL_SIZE = { free: '8px', rented: '12px', visitor: '12px', pending: '12px', closed: '12px' };
+const TYPE_LABEL_TEXT = { free: 'วนจอด', visitor: 'Visitor', closed: '✕' };
+
+function addSlot() {
+  const id    = document.getElementById('new-id').value.trim();
+  const type  = document.getElementById('new-type').value;
+  const house = document.getElementById('new-house').value.trim();
+  const note  = document.getElementById('new-note').value.trim();
+  if (!id) { showNotif('err', '❌ กรุณาใส่ชื่อช่อง'); return; }
+  // Check duplicate
+  if (document.querySelector(`.slot[data-id="${id}"]`)) {
+    showNotif('err', '❌ ชื่อช่องซ้ำกัน'); return;
+  }
+  createSlotEl({ id, type, status: TYPE_STATUS[type], house, note }, true);
+  closeAddModal();
+  updateCounts();
+  showNotif('ok', `✅ เพิ่มช่อง "${id}" แล้ว — ลากไปวางตำแหน่ง`);
+}
+
+function createSlotEl(data, isNew) {
+  const { id, type, status, house, note } = data;
+  const el = document.createElement('div');
+  el.className = `slot ${type}${isNew ? ' new-slot' : ''}`;
+  el.dataset.id = id;
+  el.dataset.type = type;
+  el.dataset.status = status;
+  el.dataset.house = house || '';
+  el.dataset.note = note || '';
+  el.dataset.dynamic = '1';
+
+  const labelSize = id.length > 4 ? '8px' : '12px';
+  el.innerHTML = `<span class="slot-label" style="font-size:${labelSize}">${id}</span><span class="slot-sub">${status}</span><div class="del-btn" onclick="delSlot(event,this)">✕</div>`;
+
+  // Center of map
+  const left = data.left || '274px';
+  const top  = data.top  || '310px';
+  el.style.cssText = `left:${left};top:${top};width:52px;height:38px;`;
+  el.setAttribute('onclick', 'hc(event,this)');
+  el.addEventListener('click', e => hc(e, el));
+
+  // Drag
+  el.addEventListener('mousedown', e => {
+    clickSX = e.clientX; clickSY = e.clientY;
+    if (!editMode) return;
+    e.preventDefault();
+    dragging = el;
+    const cr = document.getElementById('mapContainer').getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY;
+    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    el.style.zIndex = 50; el.style.transition = 'none';
+  });
+
+  document.getElementById('mapContainer').appendChild(el);
+
+  // Remove new-slot class after animation
+  if (isNew) setTimeout(() => el.classList.remove('new-slot'), 400);
+}
+
+// ── DELETE SLOT ──
+function delSlot(e, btn) {
+  e.stopPropagation();
+  if (!editMode) return;
+  const slot = btn.closest('.slot');
+  const id = slot.dataset.id;
+  if (!confirm(`ลบช่อง "${id}" ใช่ไหม?`)) return;
+  slot.style.transition = 'transform .2s, opacity .2s';
+  slot.style.transform = 'scale(0)';
+  slot.style.opacity = '0';
+  setTimeout(() => { slot.remove(); updateCounts(); }, 220);
+  showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
+}
+
+// ── DRAG ──
+document.querySelectorAll('.slot').forEach(el => {
+  el.addEventListener('mousedown', e => {
+    clickSX = e.clientX; clickSY = e.clientY;
+    if (!editMode) return;
+    e.preventDefault();
+    dragging = el;
+    const cr = document.getElementById('mapContainer').getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    startX = e.clientX; startY = e.clientY;
+    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    el.style.zIndex = 50; el.style.transition = 'none';
+  });
+  el.addEventListener('touchstart', e => {
+    if (!editMode) return;
+    const t = e.touches[0];
+    const cr = document.getElementById('mapContainer').getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    dragging = el; startX = t.clientX; startY = t.clientY;
+    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    el.style.zIndex = 50; el.style.transition = 'none';
+  }, { passive: true });
+});
+// ── SNAP HELPERS ──
+const GRID = 4;          // px — slot positions snap to multiples of this
+const SNAP_DIST = 6;     // px — proximity to other slot edges that triggers alignment snap
+let snapDisabled = false; // hold Shift to temporarily disable snap
+
+function applySnap(el, rawLeft, rawTop) {
+  // 1) snap to grid
+  let left = Math.round(rawLeft / GRID) * GRID;
+  let top  = Math.round(rawTop  / GRID) * GRID;
+  let guideX = null, guideY = null;
+
+  // 2) snap to other slots' edges / centers
+  const myW = el.offsetWidth, myH = el.offsetHeight;
+  document.querySelectorAll('.slot').forEach(o => {
+    if (o === el) return;
+    const oL = parseFloat(o.style.left) || 0;
+    const oT = parseFloat(o.style.top)  || 0;
+    const oW = o.offsetWidth, oH = o.offsetHeight;
+    // X alignments: left, right, center
+    if (Math.abs(left - oL) <= SNAP_DIST)                       { left = oL;             guideX = oL; }
+    else if (Math.abs((left+myW) - (oL+oW)) <= SNAP_DIST)       { left = oL+oW-myW;      guideX = oL+oW; }
+    else if (Math.abs((left+myW/2) - (oL+oW/2)) <= SNAP_DIST)   { left = oL+oW/2-myW/2;  guideX = oL+oW/2; }
+    // Y alignments: top, bottom, center
+    if (Math.abs(top - oT) <= SNAP_DIST)                        { top = oT;              guideY = oT; }
+    else if (Math.abs((top+myH) - (oT+oH)) <= SNAP_DIST)        { top = oT+oH-myH;       guideY = oT+oH; }
+    else if (Math.abs((top+myH/2) - (oT+oH/2)) <= SNAP_DIST)    { top = oT+oH/2-myH/2;   guideY = oT+oH/2; }
+  });
+
+  // 3) clamp inside the map
+  const cont = document.getElementById('mapContainer');
+  left = Math.max(0, Math.min(cont.clientWidth  - myW, left));
+  top  = Math.max(0, Math.min(cont.clientHeight - myH, top));
+
+  // 4) draw alignment guides
+  showGuides(guideX, guideY);
+  return [left, top];
+}
+
+function showGuides(x, y) {
+  const gH = document.getElementById('gH'), gV = document.getElementById('gV');
+  if (y != null) { gH.style.display = 'block'; gH.style.top = y + 'px'; }
+  else gH.style.display = 'none';
+  if (x != null) { gV.style.display = 'block'; gV.style.left = x + 'px'; }
+  else gV.style.display = 'none';
+}
+function hideGuides() {
+  document.getElementById('gH').style.display = 'none';
+  document.getElementById('gV').style.display = 'none';
+}
+
+document.addEventListener('keydown', e => { if (e.key === 'Shift') snapDisabled = true; });
+document.addEventListener('keyup',   e => { if (e.key === 'Shift') snapDisabled = false; });
+
+document.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const rawL = origLeft + e.clientX - startX;
+  const rawT = origTop  + e.clientY - startY;
+  if (snapDisabled) {
+    dragging.style.left = rawL + 'px';
+    dragging.style.top  = rawT + 'px';
+    hideGuides();
+  } else {
+    const [l, t] = applySnap(dragging, rawL, rawT);
+    dragging.style.left = l + 'px';
+    dragging.style.top  = t + 'px';
+  }
+});
+document.addEventListener('touchmove', e => {
+  if (!dragging) return;
+  const t = e.touches[0];
+  const rawL = origLeft + t.clientX - startX;
+  const rawT = origTop  + t.clientY - startY;
+  const [l, tp] = applySnap(dragging, rawL, rawT);
+  dragging.style.left = l + 'px';
+  dragging.style.top  = tp + 'px';
+}, { passive: true });
+document.addEventListener('mouseup', () => {
+  if (dragging) { dragging.style.zIndex = 10; dragging.style.transition = 'filter .15s,transform .1s'; dragging = null; hideGuides(); }
+});
+document.addEventListener('touchend', () => { if (dragging) { dragging.style.zIndex = 10; dragging = null; hideGuides(); } });
+
+// ── AUTO ALIGN ALL ──
+// Snap every slot's current position to the GRID, and gently group-align
+// near-neighbours (within 8px) so rows/columns become flush.
+function autoAlignAll() {
+  if (!isAdmin) return;
+  if (!editMode) toggleEdit();
+  const slots = [...document.querySelectorAll('.slot')];
+
+  // Step 1: snap every slot to grid
+  slots.forEach(s => {
+    s.style.left = Math.round((parseFloat(s.style.left)||0) / GRID) * GRID + 'px';
+    s.style.top  = Math.round((parseFloat(s.style.top)||0)  / GRID) * GRID + 'px';
+  });
+
+  // Step 2: cluster slots into rows (by top) and columns (by left), then average
+  const cluster = (vals, tol) => {
+    const sorted = [...new Set(vals)].sort((a,b)=>a-b);
+    const groups = []; let cur = [sorted[0]];
+    for (let i=1;i<sorted.length;i++){
+      if (sorted[i] - cur[cur.length-1] <= tol) cur.push(sorted[i]);
+      else { groups.push(cur); cur = [sorted[i]]; }
+    }
+    groups.push(cur);
+    const map = {};
+    groups.forEach(g => {
+      const avg = Math.round(g.reduce((a,b)=>a+b,0) / g.length / GRID) * GRID;
+      g.forEach(v => map[v] = avg);
+    });
+    return map;
+  };
+  const tops  = slots.map(s => parseFloat(s.style.top));
+  const lefts = slots.map(s => parseFloat(s.style.left));
+  const topMap  = cluster(tops, 10);
+  const leftMap = cluster(lefts, 10);
+  slots.forEach(s => {
+    s.style.left = leftMap[parseFloat(s.style.left)] + 'px';
+    s.style.top  = topMap[parseFloat(s.style.top)]  + 'px';
+  });
+  showNotif('ok', '📐 จัด slot ทั้งหมดเข้า grid แล้ว');
+}
+
+// ── CLICK TOOLTIP ──
+function hc(e, el) {
+  if (Math.abs(e.clientX - clickSX) > 6 || Math.abs(e.clientY - clickSY) > 6) return;
+  if (editMode) return;
+  const tt = document.getElementById('tt');
+  document.getElementById('ttn').textContent = '🅿️ ช่อง ' + el.dataset.id;
+  document.getElementById('tts').textContent = el.dataset.status ? '📌 ' + el.dataset.status : '';
+  document.getElementById('tth').textContent = el.dataset.house  ? '🏠 บ้าน ' + el.dataset.house : '';
+  document.getElementById('ttd').textContent = el.dataset.note   ? '📝 ' + el.dataset.note : '';
+  tt.style.left = (e.clientX + 14) + 'px';
+  tt.style.top  = (e.clientY - 10) + 'px';
+  tt.classList.add('on');
+  clearTimeout(tt._t); tt._t = setTimeout(() => tt.classList.remove('on'), 3500);
+}
+document.addEventListener('mousemove', e => {
+  const tt = document.getElementById('tt');
+  if (tt.classList.contains('on')) { tt.style.left = (e.clientX + 14) + 'px'; tt.style.top = (e.clientY - 10) + 'px'; }
+});
+
+// ── COUNT ──
+function updateCounts() {
+  const counts = { free:0, rented:0, visitor:0, pending:0, closed:0 };
+  document.querySelectorAll('.slot').forEach(el => {
+    const c = el.classList[1];
+    if (counts[c] !== undefined) counts[c]++;
+  });
+  document.getElementById('cnt-free').textContent    = counts.free;
+  document.getElementById('cnt-rented').textContent  = counts.rented;
+  document.getElementById('cnt-visitor').textContent = counts.visitor;
+  document.getElementById('cnt-pending').textContent = counts.pending;
+  document.getElementById('cnt-closed').textContent  = counts.closed;
+}
+
+// ── NOTIF ──
+function showNotif(type, msg) {
+  const n = document.getElementById('ntf');
+  document.getElementById('ntfm').textContent = msg;
+  n.className = 'notif on' + (type === 'err' ? ' err' : '');
+  clearTimeout(n._t); n._t = setTimeout(() => n.classList.remove('on'), 3000);
+}
+
+// ── CLOSE modals on overlay click ──
+document.getElementById('pinModal').addEventListener('click', e => { if (e.target === e.currentTarget) closePinModal(); });
+document.getElementById('addModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeAddModal(); });
+
+// ── INIT ──
+loadPositions();
+updateCounts();
+</script>
+</body>
+</html>
