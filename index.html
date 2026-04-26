@@ -343,14 +343,33 @@ body.edit-mode .map-container::after{
 <div class="tt" id="tt"><div class="tt-name" id="ttn"></div><div id="tts"></div><div id="tth"></div><div id="ttd"></div></div>
 <div class="notif" id="ntf"><span id="ntfm"></span></div>
 
-<script>
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+import { doc, getFirestore, onSnapshot, serverTimestamp, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyC43LJfENSYm-myZ66mURGc4FPtSfji7-Y",
+  authDomain: "pattra8-54c3f.firebaseapp.com",
+  projectId: "pattra8-54c3f",
+  storageBucket: "pattra8-54c3f.firebasestorage.app",
+  messagingSenderId: "1045231989781",
+  appId: "1:1045231989781:web:ea20c8380787e82fcf4a1c"
+};
+
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+const layoutDocRef = doc(db, 'parking', 'layout');
+
 // ── STATE ──
-const SKEY = 'pv8_slots_v4';
-const LEGACY_SKEYS = ['pv8_slots_v3'];
 let isAdmin = false, editMode = false;
 let dragging = null, startX, startY, origLeft, origTop, clickSX, clickSY;
 let slotSeq = 0;
 let mapScale = 1;
+let lastRemoteLayout = [];
+let defaultLayout = [];
+let editSnapshot = null;
+let remoteLayoutReady = false;
+const LAYOUT_SCHEMA_VERSION = 1;
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 function getThaiMonthYear(date = new Date()) {
@@ -363,12 +382,6 @@ function updateDynamicLabels() {
   const monthLabel = document.getElementById('monthLabel');
   if (badge) badge.textContent = `UPDATE สถานะที่จอดรถ · ${monthYear}`;
   if (monthLabel) monthLabel.textContent = `💰 ${monthYear}`;
-}
-
-function clearLegacyStorage() {
-  LEGACY_SKEYS.forEach(key => {
-    try { localStorage.removeItem(key); } catch (e) {}
-  });
 }
 
 function updateMapScale() {
@@ -408,6 +421,28 @@ function collectSlotRecord(el) {
   };
 }
 
+function cloneLayout(records) {
+  return records.map(record => ({ ...record }));
+}
+
+function captureCurrentLayout() {
+  return [...document.querySelectorAll('.slot')].map(collectSlotRecord);
+}
+
+function normalizeSlotRecord(record) {
+  return {
+    key: record.key || `slot:${record.id}`,
+    id: record.id || '',
+    type: record.type || 'free',
+    status: record.status || '',
+    house: record.house || '',
+    note: record.note || '',
+    left: record.left || '0px',
+    top: record.top || '0px',
+    dynamic: Boolean(record.dynamic)
+  };
+}
+
 function applySlotState(el, record) {
   ensureSlotIdentity(el);
   el.dataset.slotKey = record.key || el.dataset.slotKey;
@@ -435,65 +470,81 @@ function applySlotState(el, record) {
   }
 }
 
-// ── LOAD positions ──
-function loadPositions() {
-  try {
-    const s = JSON.parse(localStorage.getItem(SKEY) || '{}');
-    document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
+function applyLayout(records) {
+  const normalized = records.map(normalizeSlotRecord);
+  document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
+  const incoming = new Set(normalized.map(record => record.key));
+  document.querySelectorAll('.slot').forEach(el => {
+    if (!incoming.has(el.dataset.slotKey)) el.remove();
+  });
+  const existing = new Map(
+    [...document.querySelectorAll('.slot')].map(el => [el.dataset.slotKey, el])
+  );
+  normalized.forEach(record => {
+    const found = existing.get(record.key);
+    if (found) applySlotState(found, record);
+    else createSlotEl(record, false);
+  });
+  injectEditButtons();
+  updateCounts();
+}
 
-    if (Array.isArray(s.__slots__)) {
-      const savedKeys = new Set(s.__slots__.map(record => record.key));
-      document.querySelectorAll('.slot').forEach(el => {
-        if (!savedKeys.has(el.dataset.slotKey)) el.remove();
-      });
-      const existing = new Map(
-        [...document.querySelectorAll('.slot')].map(el => [el.dataset.slotKey, el])
-      );
-      s.__slots__.forEach(record => {
-        const found = existing.get(record.key);
-        if (found) applySlotState(found, record);
-        else if (record.dynamic) createSlotEl(record, false);
-      });
-      updateCounts();
+function subscribeLayout() {
+  onSnapshot(layoutDocRef, async snap => {
+    const data = snap.exists() ? (snap.data() || {}) : null;
+    if (!snap.exists() || data.schemaVersion !== LAYOUT_SCHEMA_VERSION) {
+      const seed = cloneLayout(defaultLayout.length ? defaultLayout : captureCurrentLayout());
+      lastRemoteLayout = cloneLayout(seed);
+      remoteLayoutReady = true;
+      try {
+        await setDoc(layoutDocRef, {
+          schemaVersion: LAYOUT_SCHEMA_VERSION,
+          slots: seed,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } catch (error) {
+        console.warn('Unable to seed parking layout:', error);
+      }
+      if (!editMode) applyLayout(lastRemoteLayout);
       return;
     }
-
-    document.querySelectorAll('.slot[data-dynamic="1"]').forEach(el => el.remove());
-    document.querySelectorAll('.slot').forEach(el => {
-      const d = s[el.dataset.id];
-      if (d) { el.style.left = d.l; el.style.top = d.t; }
-    });
-    if (s.__dynamic__) {
-      const seenIds = new Set([...document.querySelectorAll('.slot')].map(el => el.dataset.id));
-      s.__dynamic__.forEach(slot => {
-        if (seenIds.has(slot.id)) return;
-        seenIds.add(slot.id);
-        createSlotEl(slot, false);
-      });
-    }
-    updateCounts();
-  } catch(e) {}
-}
-
-function persistPositions(options = {}) {
-  const { exitEdit = false, silent = false, message = '✅ บันทึกทุก slot แล้ว' } = options;
-  const s = { __slots__: [] };
-  document.querySelectorAll('.slot').forEach(el => {
-    s.__slots__.push(collectSlotRecord(el));
+    const slots = Array.isArray(data?.slots) && data.slots.length
+      ? data.slots.map(normalizeSlotRecord)
+      : cloneLayout(defaultLayout.length ? defaultLayout : captureCurrentLayout());
+    lastRemoteLayout = cloneLayout(slots);
+    remoteLayoutReady = true;
+    if (!editMode) applyLayout(lastRemoteLayout);
+  }, error => {
+    console.error('Parking layout listener failed:', error);
+    showNotif('err', '❌ โหลด parking layout online ไม่สำเร็จ');
   });
-  localStorage.setItem(SKEY, JSON.stringify(s));
-  if (!silent) showNotif('ok', message);
-  if (exitEdit && editMode) toggleEdit();
 }
 
-function savePositions() {
-  persistPositions({ exitEdit: true });
+async function savePositions() {
+  const slots = captureCurrentLayout();
+  try {
+    await setDoc(layoutDocRef, {
+      schemaVersion: LAYOUT_SCHEMA_VERSION,
+      slots,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    lastRemoteLayout = cloneLayout(slots);
+    setEditMode(false, { restore: false });
+    showNotif('ok', '✅ บันทึก parking layout online แล้ว');
+  } catch (error) {
+    console.error('Unable to save parking layout:', error);
+    showNotif('err', '❌ บันทึก parking layout online ไม่สำเร็จ');
+  }
 }
 
 function resetPositions() {
-  if (!confirm('Reset ตำแหน่งและ slot ที่เพิ่มทั้งหมด?')) return;
-  localStorage.removeItem(SKEY);
-  location.reload();
+  if (!confirm('Reset กลับไปตาม layout ล่าสุดบนระบบ?')) return;
+  if (!remoteLayoutReady) {
+    showNotif('err', '❌ ยังไม่มี layout online ให้ reset');
+    return;
+  }
+  applyLayout(lastRemoteLayout);
+  showNotif('ok', '↺ กลับไปตาม layout ล่าสุดแล้ว');
 }
 
 // ── ADMIN LOGIN ──
@@ -527,13 +578,10 @@ function adminUnlock() {
   document.getElementById('editBtn').style.display = 'block';
   document.getElementById('alignBtn').style.display = 'block';
   document.getElementById('resetBtn').style.display = 'block';
-  loadPositions();
   showNotif('ok', '👑 Admin เข้าสู่ระบบแล้ว');
-  // Auto enter edit mode
-  if (!editMode) toggleEdit();
 }
 function adminLogout() {
-  if (editMode) toggleEdit();
+  if (editMode) setEditMode(false);
   isAdmin = false;
   document.getElementById('hdr').classList.remove('admin-on');
   document.getElementById('adminBtn').textContent = '🔑 Admin';
@@ -545,18 +593,39 @@ function adminLogout() {
 }
 
 // ── EDIT MODE ──
-function toggleEdit() {
-  if (!isAdmin) return;
-  editMode = !editMode;
+function setEditMode(next, options = {}) {
+  const { restore = true } = options;
+  if (!isAdmin && next) return;
+  if (editMode === next) return;
+  if (next) {
+    const baseLayout = lastRemoteLayout.length ? cloneLayout(lastRemoteLayout) : cloneLayout(captureCurrentLayout());
+    applyLayout(baseLayout);
+    editSnapshot = cloneLayout(baseLayout);
+  } else if (restore && editSnapshot) {
+    applyLayout(editSnapshot);
+  }
+  editMode = next;
   document.body.classList.toggle('edit-mode', editMode);
   document.getElementById('editBtn').textContent = editMode ? '❌ ยกเลิก' : '✏️ แก้ตำแหน่ง';
   document.getElementById('editBtn').classList.toggle('active', editMode);
   document.getElementById('saveBtn').style.display = editMode ? 'block' : 'none';
-  if (!editMode) loadPositions();
+  if (!editMode) {
+    dragging = null;
+    hideGuides();
+    closeAddModal();
+    closeEditModal();
+    editSnapshot = null;
+  }
+}
+
+function toggleEdit() {
+  setEditMode(!editMode);
 }
 
 // ── ADD SLOT MODAL ──
 function openAddModal() {
+  if (!isAdmin) return;
+  if (!editMode) setEditMode(true);
   document.getElementById('addModal').classList.add('show');
   document.getElementById('new-id').value = '';
   document.getElementById('new-type').value = 'free';
@@ -585,7 +654,6 @@ function addSlot() {
   createSlotEl({ id, type, status: TYPE_STATUS[type], house, note }, true);
   closeAddModal();
   updateCounts();
-  persistPositions({ silent: true });
   showNotif('ok', `✅ เพิ่มช่อง "${id}" แล้ว — ลากไปวางตำแหน่ง`);
 }
 
@@ -691,7 +759,6 @@ function saveEdit() {
 
   closeEditModal();
   updateCounts();
-  persistPositions({ silent: true });
   showNotif('ok', `✅ อัปเดตช่อง "${newId}"`);
 }
 
@@ -714,15 +781,9 @@ function delSlot(e, btn) {
   const slot = btn.closest('.slot');
   const id = slot.dataset.id;
   if (!confirm(`ลบช่อง "${id}" ใช่ไหม?`)) return;
-  slot.style.transition = 'transform .2s, opacity .2s';
-  slot.style.transform = 'scale(0)';
-  slot.style.opacity = '0';
-  setTimeout(() => {
-    slot.remove();
-    updateCounts();
-    persistPositions({ silent: true });
-    showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
-  }, 220);
+  slot.remove();
+  updateCounts();
+  showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
 }
 
 // ── DRAG ──
@@ -1012,13 +1073,33 @@ document.getElementById('addModal').addEventListener('click', e => { if (e.targe
 document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEditModal(); });
 
 // ── INIT ──
-clearLegacyStorage();
 updateDynamicLabels();
 updateMapScale();
 window.addEventListener('resize', updateMapScale);
 document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
 injectEditButtons();
+defaultLayout = cloneLayout(captureCurrentLayout());
+lastRemoteLayout = cloneLayout(defaultLayout);
 updateCounts();
+subscribeLayout();
+
+Object.assign(window, {
+  toggleEdit,
+  autoAlignAll,
+  savePositions,
+  resetPositions,
+  openAddModal,
+  closeAddModal,
+  addSlot,
+  openPinModal,
+  closePinModal,
+  chkpin,
+  delSlot,
+  openEditModal,
+  closeEditModal,
+  saveEdit,
+  hc
+});
 </script>
 </body>
 </html>
