@@ -530,6 +530,7 @@ function adminUnlock() {
   document.getElementById('editBtn').style.display = 'block';
   document.getElementById('alignBtn').style.display = 'block';
   document.getElementById('resetBtn').style.display = 'block';
+  loadPositions();
   showNotif('ok', '👑 Admin เข้าสู่ระบบแล้ว');
   // Auto enter edit mode
   if (!editMode) toggleEdit();
@@ -1020,7 +1021,6 @@ updateMapScale();
 window.addEventListener('resize', updateMapScale);
 document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
 injectEditButtons();
-loadPositions();
 updateCounts();
 </script>
 </body>
