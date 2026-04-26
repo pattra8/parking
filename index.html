@@ -338,40 +338,106 @@ body.edit-mode .map-container::after{
 const SKEY = 'pv8_slots_v3';
 let isAdmin = false, editMode = false;
 let dragging = null, startX, startY, origLeft, origTop, clickSX, clickSY;
+let slotSeq = 0;
+
+function nextSlotKey() {
+  slotSeq += 1;
+  return 'dyn:' + Date.now().toString(36) + ':' + slotSeq;
+}
+
+function ensureSlotIdentity(el) {
+  if (!el.dataset.slotKey) {
+    el.dataset.slotKey = 'static:' + (el.dataset.id || ('slot-' + (++slotSeq)));
+  }
+  if (!el.dataset.dynamic) {
+    el.dataset.dynamic = '0';
+  }
+}
+
+function collectSlotRecord(el) {
+  ensureSlotIdentity(el);
+  return {
+    key: el.dataset.slotKey,
+    id: el.dataset.id,
+    type: el.dataset.type || el.classList[1] || 'free',
+    status: el.dataset.status || '',
+    house: el.dataset.house || '',
+    note: el.dataset.note || '',
+    left: el.style.left,
+    top: el.style.top,
+    dynamic: el.dataset.dynamic === '1'
+  };
+}
+
+function applySlotState(el, record) {
+  ensureSlotIdentity(el);
+  el.dataset.slotKey = record.key || el.dataset.slotKey;
+  el.dataset.id = record.id;
+  el.dataset.type = record.type;
+  el.dataset.status = record.status || '';
+  el.dataset.house = record.house || '';
+  el.dataset.note = record.note || '';
+  el.dataset.dynamic = record.dynamic ? '1' : '0';
+  el.className = 'slot ' + record.type;
+  el.style.left = record.left;
+  el.style.top = record.top;
+  el.style.width = SLOT_W + 'px';
+  el.style.height = SLOT_H + 'px';
+
+  const labelSize = record.id.length > 4 ? '8px' : '12px';
+  const labelEl = el.querySelector('.slot-label');
+  if (labelEl) {
+    labelEl.textContent = record.id;
+    labelEl.style.fontSize = labelSize;
+  }
+  const subEl = el.querySelector('.slot-sub');
+  if (subEl) {
+    subEl.textContent = record.status || TYPE_STATUS[record.type] || '';
+  }
+}
 
 // ── LOAD positions ──
 function loadPositions() {
   try {
     const s = JSON.parse(localStorage.getItem(SKEY) || '{}');
+    document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
+
+    if (Array.isArray(s.__slots__)) {
+      document.querySelectorAll('.slot[data-dynamic="1"]').forEach(el => el.remove());
+      const existing = new Map(
+        [...document.querySelectorAll('.slot')].map(el => [el.dataset.slotKey, el])
+      );
+      s.__slots__.forEach(record => {
+        const found = existing.get(record.key);
+        if (found) applySlotState(found, record);
+        else if (record.dynamic) createSlotEl(record, false);
+      });
+      updateCounts();
+      return;
+    }
+
+    document.querySelectorAll('.slot[data-dynamic="1"]').forEach(el => el.remove());
     document.querySelectorAll('.slot').forEach(el => {
       const d = s[el.dataset.id];
       if (d) { el.style.left = d.l; el.style.top = d.t; }
     });
-    // Restore dynamic slots
     if (s.__dynamic__) {
-      s.__dynamic__.forEach(slot => createSlotEl(slot, false));
+      const seenIds = new Set([...document.querySelectorAll('.slot')].map(el => el.dataset.id));
+      s.__dynamic__.forEach(slot => {
+        if (seenIds.has(slot.id)) return;
+        seenIds.add(slot.id);
+        createSlotEl(slot, false);
+      });
     }
+    updateCounts();
   } catch(e) {}
 }
 
 function savePositions() {
-  const s = {};
-  const dynamic = [];
+  const s = { __slots__: [] };
   document.querySelectorAll('.slot').forEach(el => {
-    s[el.dataset.id] = { l: el.style.left, t: el.style.top };
-    if (el.dataset.dynamic === '1') {
-      dynamic.push({
-        id: el.dataset.id,
-        type: el.dataset.type,
-        status: el.dataset.status,
-        house: el.dataset.house,
-        note: el.dataset.note,
-        left: el.style.left,
-        top: el.style.top
-      });
-    }
+    s.__slots__.push(collectSlotRecord(el));
   });
-  s.__dynamic__ = dynamic;
   localStorage.setItem(SKEY, JSON.stringify(s));
   showNotif('ok', '✅ บันทึกทุก slot แล้ว');
   toggleEdit();
@@ -481,6 +547,7 @@ function createSlotEl(data, isNew) {
   const { id, type, status, house, note } = data;
   const el = document.createElement('div');
   el.className = `slot ${type}${isNew ? ' new-slot' : ''}`;
+  el.dataset.slotKey = data.key || data.slotKey || nextSlotKey();
   el.dataset.id = id;
   el.dataset.type = type;
   el.dataset.status = status;
@@ -494,7 +561,7 @@ function createSlotEl(data, isNew) {
   // Center of map
   const left = data.left || '274px';
   const top  = data.top  || '310px';
-  el.style.cssText = `left:${left};top:${top};width:52px;height:38px;`;
+  el.style.cssText = `left:${left};top:${top};width:${SLOT_W}px;height:${SLOT_H}px;`;
   el.setAttribute('onclick', 'hc(event,this)');
   el.addEventListener('click', e => hc(e, el));
 
@@ -560,7 +627,6 @@ function saveEdit() {
   slot.dataset.status = sub || TYPE_STATUS[type];
   slot.dataset.house  = house;
   slot.dataset.note   = note;
-  slot.dataset.dynamic = '1'; // mark so it persists in localStorage on save
   // Update visible label
   const labelSize = newId.length > 4 ? '8px' : '12px';
   const labelEl = slot.querySelector('.slot-label');
@@ -887,6 +953,7 @@ document.getElementById('addModal').addEventListener('click', e => { if (e.targe
 document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEditModal(); });
 
 // ── INIT ──
+document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
 injectEditButtons();
 loadPositions();
 updateCounts();
