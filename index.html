@@ -403,7 +403,10 @@ function loadPositions() {
     document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
 
     if (Array.isArray(s.__slots__)) {
-      document.querySelectorAll('.slot[data-dynamic="1"]').forEach(el => el.remove());
+      const savedKeys = new Set(s.__slots__.map(record => record.key));
+      document.querySelectorAll('.slot').forEach(el => {
+        if (!savedKeys.has(el.dataset.slotKey)) el.remove();
+      });
       const existing = new Map(
         [...document.querySelectorAll('.slot')].map(el => [el.dataset.slotKey, el])
       );
@@ -545,6 +548,7 @@ function addSlot() {
   createSlotEl({ id, type, status: TYPE_STATUS[type], house, note }, true);
   closeAddModal();
   updateCounts();
+  persistPositions({ silent: true });
   showNotif('ok', `✅ เพิ่มช่อง "${id}" แล้ว — ลากไปวางตำแหน่ง`);
 }
 
@@ -641,6 +645,7 @@ function saveEdit() {
 
   closeEditModal();
   updateCounts();
+  persistPositions({ silent: true });
   showNotif('ok', `✅ อัปเดตช่อง "${newId}"`);
 }
 
