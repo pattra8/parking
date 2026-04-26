@@ -22,9 +22,11 @@ body{font-family:"IBM Plex Sans Thai",sans-serif;background:var(--bg);color:var(
 .hdr-btns{display:flex;gap:7px;align-items:center;}
 .hbtn{background:rgba(255,255,255,0.07);border:1px solid var(--border);color:var(--muted);padding:5px 11px;border-radius:7px;font-size:11px;cursor:pointer;transition:all .2s;font-family:"IBM Plex Sans Thai",sans-serif;}
 .hbtn:hover{background:rgba(255,255,255,0.12);color:var(--text);}
+.hbtn:disabled{opacity:.5;cursor:not-allowed;background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.32);}
 .hbtn.active{background:rgba(245,158,11,0.2);border-color:rgba(245,158,11,0.5);color:#fcd34d;}
 .hbtn.admin-key{background:rgba(255,255,255,0.07);transition:all .3s;}
 .hdr.admin-on .hbtn.admin-key{background:rgba(245,158,11,0.2);border-color:rgba(245,158,11,0.5);color:#fcd34d;}
+.sync-chip{background:rgba(255,255,255,0.06);border:1px solid var(--border);color:rgba(255,255,255,0.7);padding:4px 10px;border-radius:20px;font-size:10px;white-space:nowrap;}
 /* Add slot btn — only visible when admin */
 .hbtn-add{background:linear-gradient(135deg,#22c55e,#16a34a);border:none;color:white;padding:5px 13px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:"IBM Plex Sans Thai",sans-serif;display:none;align-items:center;gap:5px;transition:opacity .2s;}
 .hbtn-add:hover{opacity:.85;}
@@ -160,10 +162,12 @@ body.edit-mode .map-container::after{
   </div>
   <div class="hdr-btns">
     <div class="live"><div class="dot"></div> LIVE</div>
+    <div class="sync-chip" id="syncLabel">Updated --:--</div>
     <button class="hbtn" id="editBtn"  onclick="toggleEdit()" style="display:none">✏️ แก้ตำแหน่ง</button>
     <button class="hbtn" id="alignBtn" onclick="autoAlignAll()" style="display:none">📐 Auto Align</button>
     <button class="hbtn" id="saveBtn"  onclick="savePositions()" style="display:none">💾 บันทึก</button>
     <button class="hbtn" id="resetBtn" onclick="resetPositions()" style="display:none">↺ Reset</button>
+    <button class="hbtn" id="backupBtn" onclick="exportLayoutBackup()" style="display:none">⬇ Backup</button>
     <button class="hbtn-add" id="addBtn" onclick="openAddModal()">＋ เพิ่มช่องจอด</button>
     <button class="hbtn admin-key" id="adminBtn" onclick="openPinModal()">🔑 Admin</button>
   </div>
@@ -369,6 +373,9 @@ let lastRemoteLayout = [];
 let defaultLayout = [];
 let editSnapshot = null;
 let remoteLayoutReady = false;
+let hasUnsavedChanges = false;
+let isSaving = false;
+let lastUpdatedAt = null;
 const LAYOUT_SCHEMA_VERSION = 1;
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
@@ -382,6 +389,50 @@ function updateDynamicLabels() {
   const monthLabel = document.getElementById('monthLabel');
   if (badge) badge.textContent = `UPDATE สถานะที่จอดรถ · ${monthYear}`;
   if (monthLabel) monthLabel.textContent = `💰 ${monthYear}`;
+}
+
+function formatUpdatedAt(value) {
+  if (!value) return 'Updated --:--';
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Updated --:--';
+  return `Updated ${date.toLocaleString('th-TH', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit'
+  })}`;
+}
+
+function updateSyncLabel() {
+  const label = document.getElementById('syncLabel');
+  if (!label) return;
+  if (isSaving) {
+    label.textContent = 'Saving...';
+    return;
+  }
+  if (editMode && hasUnsavedChanges) {
+    label.textContent = 'Draft ยังไม่บันทึก';
+    return;
+  }
+  label.textContent = formatUpdatedAt(lastUpdatedAt);
+}
+
+function updateSaveButton() {
+  const saveBtn = document.getElementById('saveBtn');
+  if (!saveBtn) return;
+  saveBtn.disabled = !editMode || !hasUnsavedChanges || isSaving;
+  saveBtn.textContent = isSaving ? '⏳ กำลังบันทึก' : '💾 บันทึก';
+}
+
+function setDirty(next = true) {
+  hasUnsavedChanges = next;
+  updateSaveButton();
+  updateSyncLabel();
+}
+
+function confirmDiscardDraft() {
+  if (!editMode || !hasUnsavedChanges) return true;
+  return confirm('มีการแก้ไขที่ยังไม่บันทึก ต้องการทิ้งการเปลี่ยนแปลงนี้ใช่ไหม?');
 }
 
 function updateMapScale() {
@@ -496,6 +547,7 @@ function subscribeLayout() {
       const seed = cloneLayout(defaultLayout.length ? defaultLayout : captureCurrentLayout());
       lastRemoteLayout = cloneLayout(seed);
       remoteLayoutReady = true;
+      lastUpdatedAt = new Date();
       try {
         await setDoc(layoutDocRef, {
           schemaVersion: LAYOUT_SCHEMA_VERSION,
@@ -506,6 +558,7 @@ function subscribeLayout() {
         console.warn('Unable to seed parking layout:', error);
       }
       if (!editMode) applyLayout(lastRemoteLayout);
+      updateSyncLabel();
       return;
     }
     const slots = Array.isArray(data?.slots) && data.slots.length
@@ -513,15 +566,22 @@ function subscribeLayout() {
       : cloneLayout(defaultLayout.length ? defaultLayout : captureCurrentLayout());
     lastRemoteLayout = cloneLayout(slots);
     remoteLayoutReady = true;
+    lastUpdatedAt = data?.updatedAt?.toDate ? data.updatedAt.toDate() : null;
     if (!editMode) applyLayout(lastRemoteLayout);
+    updateSyncLabel();
   }, error => {
     console.error('Parking layout listener failed:', error);
     showNotif('err', '❌ โหลด parking layout online ไม่สำเร็จ');
+    updateSyncLabel();
   });
 }
 
 async function savePositions() {
+  if (!editMode || !hasUnsavedChanges || isSaving) return;
   const slots = captureCurrentLayout();
+  isSaving = true;
+  updateSaveButton();
+  updateSyncLabel();
   try {
     await setDoc(layoutDocRef, {
       schemaVersion: LAYOUT_SCHEMA_VERSION,
@@ -529,22 +589,50 @@ async function savePositions() {
       updatedAt: serverTimestamp()
     }, { merge: true });
     lastRemoteLayout = cloneLayout(slots);
+    hasUnsavedChanges = false;
     setEditMode(false, { restore: false });
     showNotif('ok', '✅ บันทึก parking layout online แล้ว');
   } catch (error) {
     console.error('Unable to save parking layout:', error);
     showNotif('err', '❌ บันทึก parking layout online ไม่สำเร็จ');
+  } finally {
+    isSaving = false;
+    updateSaveButton();
+    updateSyncLabel();
   }
 }
 
 function resetPositions() {
+  if (!confirmDiscardDraft()) return;
   if (!confirm('Reset กลับไปตาม layout ล่าสุดบนระบบ?')) return;
   if (!remoteLayoutReady) {
     showNotif('err', '❌ ยังไม่มี layout online ให้ reset');
     return;
   }
   applyLayout(lastRemoteLayout);
+  setDirty(false);
   showNotif('ok', '↺ กลับไปตาม layout ล่าสุดแล้ว');
+}
+
+function exportLayoutBackup() {
+  const sourceLayout = editMode ? captureCurrentLayout() : (lastRemoteLayout.length ? lastRemoteLayout : captureCurrentLayout());
+  const payload = {
+    schemaVersion: LAYOUT_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    updatedAt: lastUpdatedAt ? lastUpdatedAt.toISOString() : null,
+    slots: cloneLayout(sourceLayout)
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  a.href = url;
+  a.download = `pattra-parking-backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  showNotif('ok', '⬇️ ดาวน์โหลด backup layout แล้ว');
 }
 
 // ── ADMIN LOGIN ──
@@ -578,9 +666,11 @@ function adminUnlock() {
   document.getElementById('editBtn').style.display = 'block';
   document.getElementById('alignBtn').style.display = 'block';
   document.getElementById('resetBtn').style.display = 'block';
+  document.getElementById('backupBtn').style.display = 'block';
   showNotif('ok', '👑 Admin เข้าสู่ระบบแล้ว');
 }
 function adminLogout() {
+  if (!confirmDiscardDraft()) return;
   if (editMode) setEditMode(false);
   isAdmin = false;
   document.getElementById('hdr').classList.remove('admin-on');
@@ -589,6 +679,7 @@ function adminLogout() {
   document.getElementById('alignBtn').style.display = 'none';
   document.getElementById('saveBtn').style.display = 'none';
   document.getElementById('resetBtn').style.display = 'none';
+  document.getElementById('backupBtn').style.display = 'none';
   showNotif('ok', '🔒 ออกจากระบบแล้ว');
 }
 
@@ -597,10 +688,12 @@ function setEditMode(next, options = {}) {
   const { restore = true } = options;
   if (!isAdmin && next) return;
   if (editMode === next) return;
+  if (!next && restore && !confirmDiscardDraft()) return;
   if (next) {
     const baseLayout = lastRemoteLayout.length ? cloneLayout(lastRemoteLayout) : cloneLayout(captureCurrentLayout());
     applyLayout(baseLayout);
     editSnapshot = cloneLayout(baseLayout);
+    hasUnsavedChanges = false;
   } else if (restore && editSnapshot) {
     applyLayout(editSnapshot);
   }
@@ -615,7 +708,10 @@ function setEditMode(next, options = {}) {
     closeAddModal();
     closeEditModal();
     editSnapshot = null;
+    hasUnsavedChanges = false;
   }
+  updateSaveButton();
+  updateSyncLabel();
 }
 
 function toggleEdit() {
@@ -654,6 +750,7 @@ function addSlot() {
   createSlotEl({ id, type, status: TYPE_STATUS[type], house, note }, true);
   closeAddModal();
   updateCounts();
+  setDirty(true);
   showNotif('ok', `✅ เพิ่มช่อง "${id}" แล้ว — ลากไปวางตำแหน่ง`);
 }
 
@@ -759,6 +856,7 @@ function saveEdit() {
 
   closeEditModal();
   updateCounts();
+  setDirty(true);
   showNotif('ok', `✅ อัปเดตช่อง "${newId}"`);
 }
 
@@ -783,6 +881,7 @@ function delSlot(e, btn) {
   if (!confirm(`ลบช่อง "${id}" ใช่ไหม?`)) return;
   slot.remove();
   updateCounts();
+  setDirty(true);
   showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
 }
 
@@ -954,9 +1053,27 @@ document.addEventListener('touchmove', e => {
   dragging.style.top  = tp + 'px';
 }, { passive: true });
 document.addEventListener('mouseup', () => {
-  if (dragging) { dragging.style.zIndex = 10; dragging.style.transition = 'filter .15s,transform .1s'; dragging = null; hideGuides(); }
+  if (dragging) {
+    dragging.style.zIndex = 10;
+    dragging.style.transition = 'filter .15s,transform .1s';
+    const moved = (Math.abs((parseFloat(dragging.style.left) || 0) - origLeft) > 0.1) ||
+      (Math.abs((parseFloat(dragging.style.top) || 0) - origTop) > 0.1);
+    if (moved) setDirty(true);
+    dragging = null;
+    hideGuides();
+  }
 });
-document.addEventListener('touchend', () => { if (dragging) { dragging.style.zIndex = 10; dragging = null; hideGuides(); } });
+document.addEventListener('touchend', () => {
+  if (dragging) {
+    dragging.style.zIndex = 10;
+    dragging.style.transition = 'filter .15s,transform .1s';
+    const moved = (Math.abs((parseFloat(dragging.style.left) || 0) - origLeft) > 0.1) ||
+      (Math.abs((parseFloat(dragging.style.top) || 0) - origTop) > 0.1);
+    if (moved) setDirty(true);
+    dragging = null;
+    hideGuides();
+  }
+});
 
 function normalizeRow(row) {
   if (row.length < 2) return;
@@ -1023,6 +1140,7 @@ function autoAlignAll() {
   groupByAxis(metrics, 'col', COL_TOL).forEach(normalizeColumn);
   refreshMetricCenters(metrics);
   applyMetrics(metrics);
+  setDirty(true);
   showNotif('ok', '📐 จัดแนว slot ให้สมดุลขึ้นแล้ว');
 }
 
@@ -1081,6 +1199,8 @@ injectEditButtons();
 defaultLayout = cloneLayout(captureCurrentLayout());
 lastRemoteLayout = cloneLayout(defaultLayout);
 updateCounts();
+updateSaveButton();
+updateSyncLabel();
 subscribeLayout();
 
 Object.assign(window, {
@@ -1088,6 +1208,7 @@ Object.assign(window, {
   autoAlignAll,
   savePositions,
   resetPositions,
+  exportLayoutBackup,
   openAddModal,
   closeAddModal,
   addSlot,
