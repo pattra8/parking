@@ -6,7 +6,7 @@
 <title>PATTRA VILLA 8 - Parking System</title>
 <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@600;700;800&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0a0f1a;--surface:#111827;--border:rgba(255,255,255,0.08);--text:#f1f5f9;--muted:rgba(255,255,255,0.45);--accent:#38bdf8;--amber:#f59e0b;}
+:root{--bg:#0a0f1a;--surface:#111827;--border:rgba(255,255,255,0.08);--text:#f1f5f9;--muted:rgba(255,255,255,0.45);--accent:#38bdf8;--amber:#f59e0b;--map-w:600;--map-h:677;}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:"IBM Plex Sans Thai",sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
 
@@ -33,7 +33,8 @@ body{font-family:"IBM Plex Sans Thai",sans-serif;background:var(--bg);color:var(
 /* ── MAIN ── */
 .main{flex:1;display:flex;overflow:hidden;}
 .map-outer{flex:1;overflow:auto;background:#060b12;display:flex;align-items:flex-start;justify-content:center;padding:14px;}
-.map-container{position:relative;width:600px;height:677px;flex-shrink:0;border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.7);}
+.map-frame{position:relative;width:calc(var(--map-w) * 1px);aspect-ratio:var(--map-w) / var(--map-h);flex-shrink:0;}
+.map-container{position:absolute;top:0;left:0;width:calc(var(--map-w) * 1px);height:calc(var(--map-h) * 1px);border-radius:12px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.7);transform-origin:top left;}
 .map-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;}
 .map-badge{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:rgba(8,14,26,0.88);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px 18px;font-family:"Prompt",sans-serif;font-size:16px;font-weight:800;color:white;white-space:nowrap;z-index:5;pointer-events:none;box-shadow:0 8px 20px rgba(0,0,0,0.28);}
 .edit-hint{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);background:rgba(245,158,11,0.92);color:#0a0f1a;padding:4px 14px;border-radius:20px;font-size:10px;font-weight:700;font-family:"Prompt",sans-serif;z-index:20;display:none;white-space:nowrap;pointer-events:none;}
@@ -134,6 +135,18 @@ body.edit-mode .map-container::after{
        box-shadow:0 0 8px rgba(56,189,248,0.7);transition:opacity .12s;}
 .guide.h{height:1px;left:0;right:0;}
 .guide.v{width:1px;top:0;bottom:0;}
+
+@media (max-width: 768px){
+  body{overflow:auto;}
+  .hdr{height:auto;padding:10px 12px;align-items:flex-start;gap:8px;flex-wrap:wrap;}
+  .logo{font-size:11px;line-height:1.25;max-width:100%;}
+  .hdr-btns{width:100%;justify-content:flex-end;flex-wrap:wrap;}
+  .hbtn,.hbtn-add,.live{font-size:10px;}
+  .main{overflow:auto;}
+  .map-outer{padding:8px;justify-content:center;}
+  .map-frame{width:min(calc(100vw - 16px), calc(var(--map-w) * 1px));}
+  .map-badge{font-size:12px;padding:7px 14px;max-width:calc(100% - 24px);text-align:center;line-height:1.25;}
+}
 </style>
 </head>
 <body>
@@ -159,6 +172,7 @@ body.edit-mode .map-container::after{
 <!-- ── MAIN ── -->
 <div class="main">
 <div class="map-outer">
+  <div class="map-frame" id="mapFrame">
   <div class="map-container" id="mapContainer">
     <img class="map-bg" src="bg.jpg" alt="Villa aerial"/>
     <div class="map-badge" id="mapBadge">UPDATE สถานะที่จอดรถ</div>
@@ -192,6 +206,7 @@ body.edit-mode .map-container::after{
     <!-- Alignment guides (shown while dragging) -->
     <div class="guide h" id="gH" style="display:none"></div>
     <div class="guide v" id="gV" style="display:none"></div>
+  </div>
   </div>
 </div>
 
@@ -337,6 +352,7 @@ const SKEY = 'pv8_slots_v3';
 let isAdmin = false, editMode = false;
 let dragging = null, startX, startY, origLeft, origTop, clickSX, clickSY;
 let slotSeq = 0;
+let mapScale = 1;
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 function getThaiMonthYear(date = new Date()) {
@@ -349,6 +365,14 @@ function updateDynamicLabels() {
   const monthLabel = document.getElementById('monthLabel');
   if (badge) badge.textContent = `UPDATE สถานะที่จอดรถ · ${monthYear}`;
   if (monthLabel) monthLabel.textContent = `💰 ${monthYear}`;
+}
+
+function updateMapScale() {
+  const frame = document.getElementById('mapFrame');
+  const container = document.getElementById('mapContainer');
+  if (!frame || !container) return;
+  mapScale = frame.clientWidth / 600 || 1;
+  container.style.transform = `scale(${mapScale})`;
 }
 
 function nextSlotKey() {
@@ -588,12 +612,21 @@ function createSlotEl(data, isNew) {
     if (!editMode) return;
     e.preventDefault();
     dragging = el;
-    const cr = document.getElementById('mapContainer').getBoundingClientRect();
-    const er = el.getBoundingClientRect();
     startX = e.clientX; startY = e.clientY;
-    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    origLeft = parseFloat(el.style.left) || 0;
+    origTop = parseFloat(el.style.top) || 0;
     el.style.zIndex = 50; el.style.transition = 'none';
   });
+
+  el.addEventListener('touchstart', e => {
+    if (!editMode) return;
+    const t = e.touches[0];
+    clickSX = t.clientX; clickSY = t.clientY;
+    dragging = el; startX = t.clientX; startY = t.clientY;
+    origLeft = parseFloat(el.style.left) || 0;
+    origTop = parseFloat(el.style.top) || 0;
+    el.style.zIndex = 50; el.style.transition = 'none';
+  }, { passive: true });
 
   document.getElementById('mapContainer').appendChild(el);
 
@@ -694,19 +727,18 @@ document.querySelectorAll('.slot').forEach(el => {
     if (!editMode) return;
     e.preventDefault();
     dragging = el;
-    const cr = document.getElementById('mapContainer').getBoundingClientRect();
-    const er = el.getBoundingClientRect();
     startX = e.clientX; startY = e.clientY;
-    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    origLeft = parseFloat(el.style.left) || 0;
+    origTop = parseFloat(el.style.top) || 0;
     el.style.zIndex = 50; el.style.transition = 'none';
   });
   el.addEventListener('touchstart', e => {
     if (!editMode) return;
     const t = e.touches[0];
-    const cr = document.getElementById('mapContainer').getBoundingClientRect();
-    const er = el.getBoundingClientRect();
+    clickSX = t.clientX; clickSY = t.clientY;
     dragging = el; startX = t.clientX; startY = t.clientY;
-    origLeft = er.left - cr.left; origTop = er.top - cr.top;
+    origLeft = parseFloat(el.style.left) || 0;
+    origTop = parseFloat(el.style.top) || 0;
     el.style.zIndex = 50; el.style.transition = 'none';
   }, { passive: true });
 });
@@ -834,8 +866,8 @@ document.addEventListener('keyup',   e => { if (e.key === 'Shift') snapDisabled 
 
 document.addEventListener('mousemove', e => {
   if (!dragging) return;
-  const rawL = origLeft + e.clientX - startX;
-  const rawT = origTop  + e.clientY - startY;
+  const rawL = origLeft + (e.clientX - startX) / mapScale;
+  const rawT = origTop  + (e.clientY - startY) / mapScale;
   if (snapDisabled) {
     dragging.style.left = rawL + 'px';
     dragging.style.top  = rawT + 'px';
@@ -849,8 +881,8 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('touchmove', e => {
   if (!dragging) return;
   const t = e.touches[0];
-  const rawL = origLeft + t.clientX - startX;
-  const rawT = origTop  + t.clientY - startY;
+  const rawL = origLeft + (t.clientX - startX) / mapScale;
+  const rawT = origTop  + (t.clientY - startY) / mapScale;
   const [l, tp] = applySnap(dragging, rawL, rawT);
   dragging.style.left = l + 'px';
   dragging.style.top  = tp + 'px';
@@ -976,6 +1008,8 @@ document.getElementById('editModal').addEventListener('click', e => { if (e.targ
 
 // ── INIT ──
 updateDynamicLabels();
+updateMapScale();
+window.addEventListener('resize', updateMapScale);
 document.querySelectorAll('.slot').forEach(ensureSlotIdentity);
 injectEditButtons();
 loadPositions();
