@@ -348,7 +348,8 @@ body.edit-mode .map-container::after{
 
 <script>
 // ── STATE ──
-const SKEY = 'pv8_slots_v3';
+const SKEY = 'pv8_slots_v4';
+const LEGACY_SKEYS = ['pv8_slots_v3'];
 let isAdmin = false, editMode = false;
 let dragging = null, startX, startY, origLeft, origTop, clickSX, clickSY;
 let slotSeq = 0;
@@ -365,6 +366,12 @@ function updateDynamicLabels() {
   const monthLabel = document.getElementById('monthLabel');
   if (badge) badge.textContent = `UPDATE สถานะที่จอดรถ · ${monthYear}`;
   if (monthLabel) monthLabel.textContent = `💰 ${monthYear}`;
+}
+
+function clearLegacyStorage() {
+  LEGACY_SKEYS.forEach(key => {
+    try { localStorage.removeItem(key); } catch (e) {}
+  });
 }
 
 function updateMapScale() {
@@ -1007,6 +1014,7 @@ document.getElementById('addModal').addEventListener('click', e => { if (e.targe
 document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEditModal(); });
 
 // ── INIT ──
+clearLegacyStorage();
 updateDynamicLabels();
 updateMapScale();
 window.addEventListener('resize', updateMapScale);
