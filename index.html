@@ -377,6 +377,8 @@ let hasUnsavedChanges = false;
 let isSaving = false;
 let lastUpdatedAt = null;
 const LAYOUT_SCHEMA_VERSION = 1;
+const ADMIN_SESSION_KEY = 'pv8_admin_session_v1';
+const ADMIN_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 function getThaiMonthYear(date = new Date()) {
@@ -433,6 +435,40 @@ function setDirty(next = true) {
 function confirmDiscardDraft() {
   if (!editMode || !hasUnsavedChanges) return true;
   return confirm('มีการแก้ไขที่ยังไม่บันทึก ต้องการทิ้งการเปลี่ยนแปลงนี้ใช่ไหม?');
+}
+
+function writeAdminSession() {
+  try {
+    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({
+      expiresAt: Date.now() + ADMIN_SESSION_MS
+    }));
+  } catch (error) {
+    console.warn('Unable to persist admin session:', error);
+  }
+}
+
+function clearAdminSession() {
+  try {
+    localStorage.removeItem(ADMIN_SESSION_KEY);
+  } catch (error) {
+    console.warn('Unable to clear admin session:', error);
+  }
+}
+
+function hasValidAdminSession() {
+  try {
+    const raw = localStorage.getItem(ADMIN_SESSION_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.expiresAt || parsed.expiresAt <= Date.now()) {
+      clearAdminSession();
+      return false;
+    }
+    return true;
+  } catch (error) {
+    clearAdminSession();
+    return false;
+  }
 }
 
 function updateMapScale() {
@@ -661,6 +697,7 @@ function chkpin() {
 }
 function adminUnlock() {
   isAdmin = true;
+  writeAdminSession();
   document.getElementById('hdr').classList.add('admin-on');
   document.getElementById('adminBtn').textContent = '🔓 ออกจากระบบ';
   document.getElementById('editBtn').style.display = 'block';
@@ -673,6 +710,7 @@ function adminLogout() {
   if (!confirmDiscardDraft()) return;
   if (editMode) setEditMode(false);
   isAdmin = false;
+  clearAdminSession();
   document.getElementById('hdr').classList.remove('admin-on');
   document.getElementById('adminBtn').textContent = '🔑 Admin';
   document.getElementById('editBtn').style.display = 'none';
@@ -1202,6 +1240,9 @@ updateCounts();
 updateSaveButton();
 updateSyncLabel();
 subscribeLayout();
+if (hasValidAdminSession()) {
+  adminUnlock();
+}
 
 Object.assign(window, {
   toggleEdit,
