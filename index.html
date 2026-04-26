@@ -65,11 +65,12 @@ body.edit-mode .slot:active{cursor:grabbing;transform:scale(1.08);filter:brightn
 body.edit-mode .slot .del-btn{display:flex;}
 .slot .del-btn:hover{background:#b91c1c;transform:scale(1.2);}
 
+/* Edit (rename) btn on slot in edit mode */
+.slot .edit-btn{position:absolute;top:-7px;left:-7px;width:16px;height:16px;background:#38bdf8;border:1.5px solid white;border-radius:50%;font-size:9px;color:white;display:none;align-items:center;justify-content:center;cursor:pointer;z-index:30;font-weight:900;line-height:1;}
+body.edit-mode .slot .edit-btn{display:flex;}
+.slot .edit-btn:hover{background:#0284c7;transform:scale(1.2);}
+
 /* ── DECORATIVE ── */
-.vis-zone{position:absolute;border:1.5px dashed rgba(96,165,250,0.5);border-radius:8px;background:rgba(59,130,246,0.07);z-index:8;pointer-events:none;}
-.vis-label{position:absolute;font-family:"Prompt",sans-serif;font-size:9px;font-weight:700;color:rgba(147,197,253,0.85);pointer-events:none;}
-.glow-ring{position:absolute;border:2px solid #22c55e;border-radius:50%;background:rgba(34,197,94,0.1);z-index:7;pointer-events:none;animation:gpulse 2s infinite;}
-@keyframes gpulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(1.05)}}
 .entrance{position:absolute;z-index:10;pointer-events:none;}
 
 /* ── SIDEBAR ── */
@@ -161,13 +162,6 @@ body.edit-mode .map-container::after{
   <div class="map-container" id="mapContainer">
     <img class="map-bg" src="bg.jpg" alt="Villa aerial"/>
     <div class="map-badge">UPDATE สถานะที่จอดรถ · เมษายน 2569</div>
-
-    <!-- Visitor zone -->
-    <div class="vis-zone"  style="left:28px;top:610px;width:216px;height:54px;"></div>
-    <div class="vis-label" style="left:34px;top:613px;">👥 Visitors Zone</div>
-
-    <!-- Glow วนจอด C -->
-    <div class="glow-ring" style="left:294px;top:510px;width:66px;height:66px;"></div>
 
     <!-- Entrance -->
     <div class="entrance" style="left:18px;bottom:54px;">
@@ -294,6 +288,43 @@ body.edit-mode .map-container::after{
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeAddModal()">ยกเลิก</button>
       <button class="btn-confirm" onclick="addSlot()">＋ เพิ่มช่องจอด</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ EDIT SLOT MODAL ══ -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <h2>✎ แก้ไขช่องจอด <span id="edit-orig" style="color:#94a3b8;font-weight:500;font-size:13px"></span></h2>
+    <div class="field">
+      <label>ชื่อช่อง *</label>
+      <input type="text" id="edit-id" placeholder="เช่น /55, วนจอด D, V4"/>
+    </div>
+    <div class="field">
+      <label>ประเภท *</label>
+      <select id="edit-type">
+        <option value="free">🟢 ว่าง</option>
+        <option value="rented">🔴 เช่าประจำ</option>
+        <option value="visitor">🔵 Visitor</option>
+        <option value="pending">🟡 รอ Confirm</option>
+        <option value="closed">⬛ ปิด</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>สถานะที่แสดง (เช่น ว่าง, เช่าอยู่, รอ confirm)</label>
+      <input type="text" id="edit-sub" placeholder="เว้นว่าง = ใช้ตามประเภท"/>
+    </div>
+    <div class="field">
+      <label>บ้านเลขที่</label>
+      <input type="text" id="edit-house" placeholder="เช่น 55"/>
+    </div>
+    <div class="field">
+      <label>หมายเหตุ</label>
+      <input type="text" id="edit-note" placeholder="เช่น เช่าตั้งแต่ พ.ค. 69"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeEditModal()">ยกเลิก</button>
+      <button class="btn-confirm" onclick="saveEdit()">💾 บันทึก</button>
     </div>
   </div>
 </div>
@@ -458,7 +489,7 @@ function createSlotEl(data, isNew) {
   el.dataset.dynamic = '1';
 
   const labelSize = id.length > 4 ? '8px' : '12px';
-  el.innerHTML = `<span class="slot-label" style="font-size:${labelSize}">${id}</span><span class="slot-sub">${status}</span><div class="del-btn" onclick="delSlot(event,this)">✕</div>`;
+  el.innerHTML = `<span class="slot-label" style="font-size:${labelSize}">${id}</span><span class="slot-sub">${status}</span><div class="edit-btn" onclick="openEditModal(event,this)">✎</div><div class="del-btn" onclick="delSlot(event,this)">✕</div>`;
 
   // Center of map
   const left = data.left || '274px';
@@ -484,6 +515,74 @@ function createSlotEl(data, isNew) {
 
   // Remove new-slot class after animation
   if (isNew) setTimeout(() => el.classList.remove('new-slot'), 400);
+}
+
+// ── EDIT SLOT MODAL ──
+let editingSlot = null;
+function openEditModal(e, btn) {
+  e.stopPropagation();
+  if (!editMode) return;
+  const slot = btn.closest('.slot');
+  editingSlot = slot;
+  document.getElementById('edit-orig').textContent  = `(เดิม: ${slot.dataset.id})`;
+  document.getElementById('edit-id').value          = slot.dataset.id  || '';
+  document.getElementById('edit-type').value        = slot.dataset.type
+                                                      || slot.classList[1] || 'free';
+  document.getElementById('edit-sub').value         = slot.querySelector('.slot-sub')?.textContent || '';
+  document.getElementById('edit-house').value       = slot.dataset.house || '';
+  document.getElementById('edit-note').value        = slot.dataset.note  || '';
+  document.getElementById('editModal').classList.add('show');
+  setTimeout(() => document.getElementById('edit-id').focus(), 200);
+}
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('show');
+  editingSlot = null;
+}
+function saveEdit() {
+  if (!editingSlot) return;
+  const slot  = editingSlot;
+  const newId = document.getElementById('edit-id').value.trim();
+  const type  = document.getElementById('edit-type').value;
+  const sub   = document.getElementById('edit-sub').value.trim();
+  const house = document.getElementById('edit-house').value.trim();
+  const note  = document.getElementById('edit-note').value.trim();
+  if (!newId) { showNotif('err', '❌ ใส่ชื่อช่อง'); return; }
+  // Check duplicate id (skip self)
+  const dup = document.querySelector(`.slot[data-id="${newId}"]`);
+  if (dup && dup !== slot) { showNotif('err', '❌ ชื่อช่องซ้ำ'); return; }
+
+  // Update class (type) — keep "slot" + new type, preserve "new-slot" if present
+  const wasNew = slot.classList.contains('new-slot');
+  slot.className = 'slot ' + type + (wasNew ? ' new-slot' : '');
+  // Update data attrs
+  slot.dataset.id     = newId;
+  slot.dataset.type   = type;
+  slot.dataset.status = sub || TYPE_STATUS[type];
+  slot.dataset.house  = house;
+  slot.dataset.note   = note;
+  slot.dataset.dynamic = '1'; // mark so it persists in localStorage on save
+  // Update visible label
+  const labelSize = newId.length > 4 ? '8px' : '12px';
+  const labelEl = slot.querySelector('.slot-label');
+  if (labelEl) { labelEl.textContent = newId; labelEl.style.fontSize = labelSize; }
+  const subEl = slot.querySelector('.slot-sub');
+  if (subEl) subEl.textContent = sub || TYPE_STATUS[type];
+
+  closeEditModal();
+  updateCounts();
+  showNotif('ok', `✅ อัปเดตช่อง "${newId}"`);
+}
+
+// Inject ✎ button into static (HTML-defined) slots that don't have one yet
+function injectEditButtons() {
+  document.querySelectorAll('.slot').forEach(slot => {
+    if (slot.querySelector('.edit-btn')) return;
+    const btn = document.createElement('div');
+    btn.className = 'edit-btn';
+    btn.textContent = '✎';
+    btn.setAttribute('onclick', 'openEditModal(event,this)');
+    slot.appendChild(btn);
+  });
 }
 
 // ── DELETE SLOT ──
@@ -689,8 +788,10 @@ function showNotif(type, msg) {
 // ── CLOSE modals on overlay click ──
 document.getElementById('pinModal').addEventListener('click', e => { if (e.target === e.currentTarget) closePinModal(); });
 document.getElementById('addModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeAddModal(); });
+document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEditModal(); });
 
 // ── INIT ──
+injectEditButtons();
 loadPositions();
 updateCounts();
 </script>
