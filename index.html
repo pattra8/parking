@@ -433,14 +433,19 @@ function loadPositions() {
   } catch(e) {}
 }
 
-function savePositions() {
+function persistPositions(options = {}) {
+  const { exitEdit = false, silent = false, message = '✅ บันทึกทุก slot แล้ว' } = options;
   const s = { __slots__: [] };
   document.querySelectorAll('.slot').forEach(el => {
     s.__slots__.push(collectSlotRecord(el));
   });
   localStorage.setItem(SKEY, JSON.stringify(s));
-  showNotif('ok', '✅ บันทึกทุก slot แล้ว');
-  toggleEdit();
+  if (!silent) showNotif('ok', message);
+  if (exitEdit && editMode) toggleEdit();
+}
+
+function savePositions() {
+  persistPositions({ exitEdit: true });
 }
 
 function resetPositions() {
@@ -661,8 +666,12 @@ function delSlot(e, btn) {
   slot.style.transition = 'transform .2s, opacity .2s';
   slot.style.transform = 'scale(0)';
   slot.style.opacity = '0';
-  setTimeout(() => { slot.remove(); updateCounts(); }, 220);
-  showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
+  setTimeout(() => {
+    slot.remove();
+    updateCounts();
+    persistPositions({ silent: true });
+    showNotif('ok', `🗑️ ลบช่อง "${id}" แล้ว`);
+  }, 220);
 }
 
 // ── DRAG ──
