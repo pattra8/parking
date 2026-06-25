@@ -206,7 +206,6 @@ body.edit-mode .map-container::after{
     <button class="hbtn" id="resetBtn" onclick="resetPositions()" style="display:none">↺ Reset</button>
     <button class="hbtn" id="backupBtn" onclick="exportLayoutBackup()" style="display:none">⬇ Backup</button>
     <button class="hbtn-add" id="addBtn" onclick="openAddModal()">＋ เพิ่มช่องจอด</button>
-    <button class="hbtn admin-key" id="adminBtn" onclick="openPinModal()">🔑 Admin</button>
   </div>
 </div>
 
@@ -317,23 +316,6 @@ body.edit-mode .map-container::after{
   </div>
 </div>
 
-<!-- ══ PIN MODAL ══ -->
-<div class="modal-overlay" id="pinModal">
-  <div class="modal">
-    <h2>🔐 Admin Login</h2>
-    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">กรอกรหัสผ่านผู้ดูแล</p>
-    <div class="pin-row">
-      <input class="pin-d" type="password" id="admin-pass" placeholder="Password" onkeydown="if(event.key==='Enter') chkpin()"/>
-    </div>
-    <div class="pin-err" id="pin-err">PIN ไม่ถูกต้อง ลองอีกครั้ง</div>
-    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px">Admin password only</div>
-    <div class="modal-actions" style="margin-top:14px">
-      <button class="btn-confirm" onclick="chkpin()">เข้าสู่ระบบ</button>
-      <button class="btn-cancel" onclick="closePinModal()">ยกเลิก</button>
-    </div>
-  </div>
-</div>
-
 <!-- ══ ADD SLOT MODAL ══ -->
 <div class="modal-overlay" id="addModal">
   <div class="modal">
@@ -438,8 +420,8 @@ let hasUnsavedChanges = false;
 let isSaving = false;
 let lastUpdatedAt = null;
 const LAYOUT_SCHEMA_VERSION = 1;
-const ADMIN_SESSION_KEY = 'pv8_admin_session_v1';
-const ADMIN_SESSION_MS = 30 * 24 * 60 * 60 * 1000;
+// Edit access = committee members only (resolved from Center's access matrix)
+const ADMIN_ACCESS_URL = 'https://asia-southeast1-pattra8-54c3f.cloudfunctions.net/adminAccessMatrix';
 const THAI_MONTHS = ['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
 
 function getThaiMonthYear(date = new Date()) {
@@ -499,40 +481,6 @@ function setDirty(next = true) {
 function confirmDiscardDraft() {
   if (!editMode || !hasUnsavedChanges) return true;
   return confirm('มีการแก้ไขที่ยังไม่บันทึก ต้องการทิ้งการเปลี่ยนแปลงนี้ใช่ไหม?');
-}
-
-function writeAdminSession() {
-  try {
-    localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({
-      expiresAt: Date.now() + ADMIN_SESSION_MS
-    }));
-  } catch (error) {
-    console.warn('Unable to persist admin session:', error);
-  }
-}
-
-function clearAdminSession() {
-  try {
-    localStorage.removeItem(ADMIN_SESSION_KEY);
-  } catch (error) {
-    console.warn('Unable to clear admin session:', error);
-  }
-}
-
-function hasValidAdminSession() {
-  try {
-    const raw = localStorage.getItem(ADMIN_SESSION_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.expiresAt || parsed.expiresAt <= Date.now()) {
-      clearAdminSession();
-      return false;
-    }
-    return true;
-  } catch (error) {
-    clearAdminSession();
-    return false;
-  }
 }
 
 function updateMapScale() {
@@ -735,54 +683,55 @@ function exportLayoutBackup() {
   showNotif('ok', '⬇️ ดาวน์โหลด backup layout แล้ว');
 }
 
-// ── ADMIN LOGIN ──
-function openPinModal() {
-  if (isAdmin) { adminLogout(); return; }
-  document.getElementById('pinModal').classList.add('show');
-  setTimeout(() => document.getElementById('admin-pass').focus(), 200);
-}
-function closePinModal() {
-  document.getElementById('pinModal').classList.remove('show');
-  document.getElementById('admin-pass').value = '';
-  document.getElementById('pin-err').style.display = 'none';
-}
-function chkpin() {
-  const pass = document.getElementById('admin-pass').value.trim();
-  if (!pass) return;
-  if (pass === 'team388' || pass === 'adminpattra8') {
-    closePinModal();
-    adminUnlock();
-  } else {
-    document.getElementById('pin-err').style.display = 'block';
-    document.getElementById('admin-pass').value = '';
-    document.getElementById('admin-pass').focus();
-    setTimeout(() => document.getElementById('pin-err').style.display = 'none', 2000);
+// ── ROLE-BASED EDIT ACCESS (committee/president only, via resident SSO) ──
+// Resolves the logged-in resident against Pattra Center's access matrix.
+// access.active === true  → committee member (กรรมการ/ประธานกรรมการ/ผู้ดูแล) → can edit
+// otherwise (incl. not logged in) → view-only
+async function resolveCommitteeAccess() {
+  const s = getResidentSession();
+  if (!s?.houseNo || !s?.pin) return null;
+  try {
+    const resp = await fetch(ADMIN_ACCESS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'resolve', houseNo: s.houseNo, pin: s.pin })
+    });
+    const data = await resp.json().catch(() => ({}));
+    return resp.ok && data.ok ? data.access : null;
+  } catch {
+    return null;
   }
 }
-function adminUnlock() {
+
+let committeeAccess = null;
+async function syncEditAccess() {
+  committeeAccess = await resolveCommitteeAccess();
+  if (committeeAccess?.active) {
+    if (!isAdmin) unlockEditing(committeeAccess.roleLabel);
+  } else {
+    if (isAdmin) lockEditing();
+  }
+}
+
+function unlockEditing(roleLabel) {
   isAdmin = true;
-  writeAdminSession();
   document.getElementById('hdr').classList.add('admin-on');
-  document.getElementById('adminBtn').textContent = '🔓 ออกจากระบบ';
   document.getElementById('editBtn').style.display = 'block';
   document.getElementById('alignBtn').style.display = 'block';
   document.getElementById('resetBtn').style.display = 'block';
   document.getElementById('backupBtn').style.display = 'block';
-  showNotif('ok', '👑 Admin เข้าสู่ระบบแล้ว');
+  showNotif('ok', `✏️ โหมดแก้ไข — ${roleLabel || 'กรรมการ'}`);
 }
-function adminLogout() {
-  if (!confirmDiscardDraft()) return;
-  if (editMode) setEditMode(false);
+
+function lockEditing() {
+  if (editMode) setEditMode(false, { restore: false });
   isAdmin = false;
-  clearAdminSession();
   document.getElementById('hdr').classList.remove('admin-on');
-  document.getElementById('adminBtn').textContent = '🔑 Admin';
   document.getElementById('editBtn').style.display = 'none';
   document.getElementById('alignBtn').style.display = 'none';
   document.getElementById('saveBtn').style.display = 'none';
   document.getElementById('resetBtn').style.display = 'none';
   document.getElementById('backupBtn').style.display = 'none';
-  showNotif('ok', '🔒 ออกจากระบบแล้ว');
 }
 
 // ── EDIT MODE ──
@@ -1288,7 +1237,6 @@ function showNotif(type, msg) {
 }
 
 // ── CLOSE modals on overlay click ──
-document.getElementById('pinModal').addEventListener('click', e => { if (e.target === e.currentTarget) closePinModal(); });
 document.getElementById('addModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeAddModal(); });
 document.getElementById('editModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeEditModal(); });
 
@@ -1304,9 +1252,6 @@ updateCounts();
 updateSaveButton();
 updateSyncLabel();
 subscribeLayout();
-if (hasValidAdminSession()) {
-  adminUnlock();
-}
 
 // ── Resident SSO session (shared across Pattra apps — matches Center) ──
 const RESIDENT_SESSION_KEY = 'pattra_resident_session_v1';
@@ -1360,6 +1305,7 @@ function logoutResident() {
   if (!confirm('ออกจากระบบ?')) return;
   clearResidentSession();
   renderHeaderIdentity(null);
+  lockEditing();
 }
 
 function showLoginModal() {
@@ -1408,6 +1354,7 @@ async function handleLoginSubmit() {
     const residentName = (data.resident && data.resident.name) || '';
     storeResidentSession(houseNo, pin, residentName);
     renderHeaderIdentity(getResidentSession());
+    syncEditAccess();
     closeLoginModal();
   } catch (e) {
     errEl.textContent = 'เกิดข้อผิดพลาด กรุณาตรวจสอบการเชื่อมต่อ';
@@ -1419,6 +1366,7 @@ async function handleLoginSubmit() {
 
 // ── Resident SSO init ──
 renderHeaderIdentity(getResidentSession());
+syncEditAccess();
 document.getElementById('loginOverlay').addEventListener('click', e => {
   if (e.target.id === 'loginOverlay') closeLoginModal();
 });
@@ -1434,7 +1382,10 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeLoginModal();
 });
 window.addEventListener('storage', e => {
-  if (e.key === RESIDENT_SESSION_KEY) renderHeaderIdentity(getResidentSession());
+  if (e.key === RESIDENT_SESSION_KEY) {
+    renderHeaderIdentity(getResidentSession());
+    syncEditAccess();
+  }
 });
 
 Object.assign(window, {
@@ -1449,9 +1400,6 @@ Object.assign(window, {
   openAddModal,
   closeAddModal,
   addSlot,
-  openPinModal,
-  closePinModal,
-  chkpin,
   delSlot,
   openEditModal,
   closeEditModal,
