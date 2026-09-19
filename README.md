@@ -31,3 +31,13 @@ Single-file web app สำหรับจัดการที่จอดรถ
 2. **Source:** Deploy from a branch
 3. **Branch:** `main` / `/ (root)` → **Save**
 4. รอ 30–60 วินาที เปิด https://pattra8.github.io/parking/
+
+## Where this page is published (since 19 Sep 2026)
+
+`/parking/` is served from the `parking/` folder of the
+[`pattra8.github.io`](https://github.com/pattra8/pattra8.github.io) repo,
+together with every other Pattra page. GitHub Pages on **this** repo is
+turned off — while it was on, a project page at `pattra8.com/parking/`
+shadowed that folder, so edits published to `pattra8.github.io` never went
+live here. Edit `parking/index.html` in `pattra8.github.io`; this repo is
+kept as the source history only.
